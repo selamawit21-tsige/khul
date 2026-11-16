@@ -1,0 +1,6 @@
+{
+  "name": "Khul Sanctuary",
+  "description": "A digital sanctuary for mindfulness, Wednesday Kinet Hiwot self-engineering sessions, Khul Corporate wellbeing, and Khul Life wellness in Addis Ababa.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

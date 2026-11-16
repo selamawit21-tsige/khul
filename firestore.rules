@@ -1,0 +1,410 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isVerifiedUser() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'tsigeselamawit925@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // --- Entity Validation Blueprints ---
+    function isValidBrand(data) {
+      return data.keys().hasAll([
+          'logoUrl', 'organizationName', 'sanctuaryName',
+          'venueName', 'venueAddress', 'googleMapsUrl', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'logoUrl', 'organizationName', 'sanctuaryName',
+          'venueName', 'venueAddress', 'venueDirections', 'googleMapsUrl', 'updatedAt'
+        ]) &&
+        data.logoUrl is string && data.logoUrl.size() <= 500 &&
+        data.organizationName is string && data.organizationName.size() >= 1 && data.organizationName.size() <= 120 &&
+        data.sanctuaryName is string && data.sanctuaryName.size() >= 1 && data.sanctuaryName.size() <= 120 &&
+        data.venueName is string && data.venueName.size() >= 1 && data.venueName.size() <= 200 &&
+        data.venueAddress is string && data.venueAddress.size() >= 1 && data.venueAddress.size() <= 300 &&
+        (!('venueDirections' in data) || (data.venueDirections is string && data.venueDirections.size() <= 600)) &&
+        data.googleMapsUrl is string && data.googleMapsUrl.size() <= 500 &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidWeeklyGame(data) {
+      return data.keys().hasAll(['weekLabel', 'title', 'prompt', 'checklistLabel', 'durationLabel', 'updatedAt']) &&
+        data.keys().hasOnly(['weekLabel', 'title', 'prompt', 'checklistLabel', 'durationLabel', 'rewardNote', 'imageUrl', 'updatedAt']) &&
+        data.weekLabel is string && data.weekLabel.size() >= 1 && data.weekLabel.size() <= 100 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        data.prompt is string && data.prompt.size() >= 1 && data.prompt.size() <= 1000 &&
+        data.checklistLabel is string && data.checklistLabel.size() >= 1 && data.checklistLabel.size() <= 240 &&
+        data.durationLabel is string && data.durationLabel.size() >= 1 && data.durationLabel.size() <= 80 &&
+        (!('rewardNote' in data) || (data.rewardNote is string && data.rewardNote.size() <= 400)) &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500)) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidSession(data) {
+      return data.keys().hasAll([
+          'id', 'title', 'theme', 'date', 'time', 'facilitator',
+          'venue', 'capacity', 'registeredCount', 'priceEtb', 'published', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'weekLabel', 'title', 'theme', 'description', 'date', 'time', 'facilitator',
+          'venue', 'mapLink', 'capacity', 'registeredCount', 'priceEtb', 'published', 'posterUrl', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        (!('weekLabel' in data) || (data.weekLabel is string && data.weekLabel.size() <= 100)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        data.theme is string && data.theme.size() >= 1 && data.theme.size() <= 200 &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 1200)) &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 80 &&
+        data.time is string && data.time.size() >= 1 && data.time.size() <= 80 &&
+        data.facilitator is string && data.facilitator.size() >= 1 && data.facilitator.size() <= 120 &&
+        data.venue is string && data.venue.size() >= 1 && data.venue.size() <= 200 &&
+        (!('mapLink' in data) || (data.mapLink is string && data.mapLink.size() <= 500)) &&
+        data.capacity is number && data.capacity >= 1 && data.capacity <= 500 &&
+        data.registeredCount is number && data.registeredCount >= 0 && data.registeredCount <= 500 &&
+        data.priceEtb is number && data.priceEtb >= 0 && data.priceEtb <= 1000000 &&
+        data.published is bool &&
+        (!('posterUrl' in data) || (data.posterUrl is string && data.posterUrl.size() <= 500)) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidPackage(data) {
+      return data.keys().hasAll(['id', 'tier', 'name', 'priceEtb', 'cadenceLabel', 'audienceLabel', 'benefits', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'tier', 'name', 'priceEtb', 'cadenceLabel', 'audienceLabel', 'benefits', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.tier in ['Single', 'Weekly', 'Monthly'] &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 140 &&
+        data.priceEtb is number && data.priceEtb >= 0 && data.priceEtb <= 1000000 &&
+        data.cadenceLabel is string && data.cadenceLabel.size() >= 1 && data.cadenceLabel.size() <= 80 &&
+        data.audienceLabel is string && data.audienceLabel.size() >= 1 && data.audienceLabel.size() <= 160 &&
+        data.benefits is list && data.benefits.size() <= 10 &&
+        (data.benefits.size() == 0 || data.benefits[0] is string) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['id', 'name', 'category', 'priceEtb', 'description', 'inStock', 'visualKey', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'category', 'priceEtb', 'description', 'inStock', 'visualKey', 'customImageUrl', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        data.category in ['Journals & Books', 'Herbal Blends', 'Practice Tools', 'Atmosphere'] &&
+        data.priceEtb is number && data.priceEtb >= 0 && data.priceEtb <= 1000000 &&
+        data.description is string && data.description.size() <= 1000 &&
+        data.inStock is bool &&
+        data.visualKey in ['journal', 'tea', 'cushion', 'chime', 'book', 'candle', 'custom'] &&
+        (!('customImageUrl' in data) || (data.customImageUrl is string && data.customImageUrl.size() <= 500)) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['id', 'title', 'category', 'body', 'publishedAt', 'author', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'title', 'category', 'body', 'publishedAt', 'author', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.category in ['Announcement', 'Self-Awareness', 'Community Update'] &&
+        data.body is string && data.body.size() >= 1 && data.body.size() <= 1500 &&
+        data.publishedAt is string && data.publishedAt.size() >= 1 && data.publishedAt.size() <= 60 &&
+        data.author is string && data.author.size() >= 1 && data.author.size() <= 100 &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidVirtueGift(data) {
+      return data.keys().hasAll(['id', 'word', 'amharicWord', 'reflection', 'amharicReflection', 'cardTheme', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'word', 'amharicWord', 'reflection', 'amharicReflection', 'practiceHint', 'cardTheme', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.word is string && data.word.size() >= 1 && data.word.size() <= 80 &&
+        data.amharicWord is string && data.amharicWord.size() >= 1 && data.amharicWord.size() <= 80 &&
+        data.reflection is string && data.reflection.size() >= 1 && data.reflection.size() <= 600 &&
+        data.amharicReflection is string && data.amharicReflection.size() >= 1 && data.amharicReflection.size() <= 600 &&
+        (!('practiceHint' in data) || (data.practiceHint is string && data.practiceHint.size() <= 300)) &&
+        data.cardTheme in ['orange', 'green', 'yellow'] &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidLeaderboardEntry(data) {
+      return data.keys().hasAll(['id', 'name', 'activePackage', 'currentStreak', 'totalDaysPracticed', 'weekDaysCompleted', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'activePackage', 'currentStreak', 'totalDaysPracticed', 'weekDaysCompleted', 'awardedBadge', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.activePackage in ['Single', 'Weekly', 'Monthly'] &&
+        data.currentStreak is number && data.currentStreak >= 0 && data.currentStreak <= 5000 &&
+        data.totalDaysPracticed is number && data.totalDaysPracticed >= 0 && data.totalDaysPracticed <= 5000 &&
+        data.weekDaysCompleted is list && data.weekDaysCompleted.size() == 7 &&
+        data.weekDaysCompleted[0] is bool &&
+        (!('awardedBadge' in data) || (data.awardedBadge is string && data.awardedBadge.size() <= 120)) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidMemberPrivate(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'name', 'email', 'stillnessIntention', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        (!('stillnessIntention' in data) || (data.stillnessIntention is string && data.stillnessIntention.size() <= 500)) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidRegistration(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'memberName', 'memberEmail', 'memberPhone',
+          'sessionId', 'sessionTitle', 'sessionDate', 'packageTier',
+          'amountEtb', 'passCode', 'attendanceStatus', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'memberName', 'memberEmail', 'memberPhone',
+          'sessionId', 'sessionTitle', 'sessionDate', 'packageTier',
+          'amountEtb', 'passCode', 'attendanceStatus', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.memberName is string && data.memberName.size() >= 1 && data.memberName.size() <= 120 &&
+        data.memberEmail is string && data.memberEmail.size() >= 3 && data.memberEmail.size() <= 160 &&
+        data.memberPhone is string && data.memberPhone.size() >= 5 && data.memberPhone.size() <= 40 &&
+        isValidId(data.sessionId) &&
+        data.sessionTitle is string && data.sessionTitle.size() >= 1 && data.sessionTitle.size() <= 180 &&
+        data.sessionDate is string && data.sessionDate.size() >= 1 && data.sessionDate.size() <= 80 &&
+        data.packageTier in ['Single', 'Weekly', 'Monthly'] &&
+        data.amountEtb is number && data.amountEtb >= 0 && data.amountEtb <= 1000000 &&
+        data.passCode is string && data.passCode.size() >= 4 && data.passCode.size() <= 40 &&
+        data.attendanceStatus in ['Confirmed', 'Checked In', 'Pending'] &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'customerName', 'customerPhone',
+          'fulfillmentMethod', 'items', 'totalEtb', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'customerName', 'customerPhone',
+          'fulfillmentMethod', 'deliveryAddress', 'items', 'totalEtb', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120 &&
+        data.customerPhone is string && data.customerPhone.size() >= 5 && data.customerPhone.size() <= 40 &&
+        data.fulfillmentMethod in ['Center Pickup (Bole Rwanda)', 'Addis Delivery'] &&
+        (!('deliveryAddress' in data) || (data.deliveryAddress is string && data.deliveryAddress.size() <= 300)) &&
+        data.items is list && data.items.size() >= 1 && data.items.size() <= 25 &&
+        data.items[0] is map &&
+        data.totalEtb is number && data.totalEtb >= 0 && data.totalEtb <= 5000000 &&
+        data.status in ['Reserved', 'Ready for Pickup', 'Out for Delivery', 'Completed'] &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidCorporateInquiry(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'organizationName', 'contactName',
+          'contactEmail', 'teamSize', 'programInterest', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'organizationName', 'contactName',
+          'contactEmail', 'teamSize', 'programInterest', 'goals', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.organizationName is string && data.organizationName.size() >= 1 && data.organizationName.size() <= 160 &&
+        data.contactName is string && data.contactName.size() >= 1 && data.contactName.size() <= 120 &&
+        data.contactEmail is string && data.contactEmail.size() >= 3 && data.contactEmail.size() <= 160 &&
+        data.teamSize is string && data.teamSize.size() >= 1 && data.teamSize.size() <= 40 &&
+        data.programInterest is string && data.programInterest.size() >= 1 && data.programInterest.size() <= 160 &&
+        (!('goals' in data) || (data.goals is string && data.goals.size() <= 1500)) &&
+        data.status in ['New Inquiry', 'Discovery Scheduled', 'Proposal Sent'] &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.role == 'admin' &&
+        data.createdAt == request.time;
+    }
+
+    // --- Public Config (Read by All, Written Only by Admin) ---
+    match /public_config/brand {
+      allow get: if true;
+      allow create, update: if isAdmin() && isValidBrand(incoming());
+    }
+
+    match /public_config/weeklyGame {
+      allow get: if true;
+      allow create, update: if isAdmin() && isValidWeeklyGame(incoming());
+    }
+
+    // --- Catalog & Content Collections (Read by All, Written Only by Admin) ---
+    match /sessions/{sessionId} {
+      allow get: if isValidId(sessionId);
+      allow list: if true;
+      allow create: if isValidId(sessionId) && isAdmin() && isValidSession(incoming()) && incoming().id == sessionId;
+      allow update: if isValidId(sessionId) && isAdmin() && isValidSession(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(sessionId) && isAdmin();
+    }
+
+    match /packages/{packageId} {
+      allow get: if isValidId(packageId);
+      allow list: if true;
+      allow create: if isValidId(packageId) && isAdmin() && isValidPackage(incoming()) && incoming().id == packageId;
+      allow update: if isValidId(packageId) && isAdmin() && isValidPackage(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(packageId) && isAdmin();
+    }
+
+    match /products/{productId} {
+      allow get: if isValidId(productId);
+      allow list: if true;
+      allow create: if isValidId(productId) && isAdmin() && isValidProduct(incoming()) && incoming().id == productId;
+      allow update: if isValidId(productId) && isAdmin() && isValidProduct(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(productId) && isAdmin();
+    }
+
+    match /announcements/{announcementId} {
+      allow get: if isValidId(announcementId);
+      allow list: if true;
+      allow create: if isValidId(announcementId) && isAdmin() && isValidAnnouncement(incoming()) && incoming().id == announcementId;
+      allow update: if isValidId(announcementId) && isAdmin() && isValidAnnouncement(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(announcementId) && isAdmin();
+    }
+
+    match /virtue_gifts/{wordId} {
+      allow get: if isValidId(wordId);
+      allow list: if true;
+      allow create: if isValidId(wordId) && isAdmin() && isValidVirtueGift(incoming()) && incoming().id == wordId;
+      allow update: if isValidId(wordId) && isAdmin() && isValidVirtueGift(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(wordId) && isAdmin();
+    }
+
+    // --- Public-Safe Leaderboard (No PII) ---
+    match /leaderboard/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if true;
+      allow create: if isValidId(userId) &&
+        isValidLeaderboardEntry(incoming()) &&
+        incoming().id == userId &&
+        (isAdmin() || (isOwner(userId) && !('awardedBadge' in incoming())));
+      allow update: if isValidId(userId) &&
+        isValidLeaderboardEntry(incoming()) &&
+        incoming().id == existing().id && (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'activePackage', 'currentStreak', 'totalDaysPracticed', 'weekDaysCompleted', 'updatedAt'
+            ])
+          )
+        );
+    }
+
+    // --- Private Member Profiles (PII Isolated) ---
+    match /members/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow create: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidMemberPrivate(incoming()) &&
+        incoming().uid == request.auth.uid;
+      allow update: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidMemberPrivate(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'stillnessIntention', 'updatedAt']);
+    }
+
+    // --- Registrations, Orders & Corporate Inquiries (Owner or Admin Only) ---
+    match /registrations/{regId} {
+      allow get: if isValidId(regId) && (isAdmin() || (isVerifiedUser() && existing().ownerId == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerId == request.auth.uid);
+      allow create: if isValidId(regId) &&
+        isVerifiedUser() &&
+        isValidRegistration(incoming()) &&
+        incoming().id == regId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().attendanceStatus == 'Confirmed' &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/sessions/$(incoming().sessionId));
+      allow update: if isValidId(regId) &&
+        isAdmin() &&
+        isValidRegistration(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['attendanceStatus', 'updatedAt']);
+    }
+
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && (isAdmin() || (isVerifiedUser() && existing().ownerId == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerId == request.auth.uid);
+      allow create: if isValidId(orderId) &&
+        isVerifiedUser() &&
+        isValidOrder(incoming()) &&
+        incoming().id == orderId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().status == 'Reserved' &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(orderId) &&
+        isAdmin() &&
+        isValidOrder(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+    }
+
+    match /corporate_inquiries/{inquiryId} {
+      allow get: if isValidId(inquiryId) && (isAdmin() || (isVerifiedUser() && existing().ownerId == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerId == request.auth.uid);
+      allow create: if isValidId(inquiryId) &&
+        isVerifiedUser() &&
+        isValidCorporateInquiry(incoming()) &&
+        incoming().id == inquiryId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().status == 'New Inquiry' &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(inquiryId) &&
+        isAdmin() &&
+        isValidCorporateInquiry(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+    }
+
+    // --- Admin Privileges Registry ---
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) && isAdmin() && isValidAdminRecord(incoming()) && incoming().uid == userId;
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+  }
+}

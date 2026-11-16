@@ -1,0 +1,279 @@
+{
+  "entities": {
+    "BrandSettings": {
+      "title": "BrandSettings",
+      "description": "Public Khul World brand logo and venue settings.",
+      "type": "object",
+      "properties": {
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "organizationName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "sanctuaryName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "venueName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "venueAddress": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "venueDirections": { "type": "string", "maxLength": 600 },
+        "googleMapsUrl": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["logoUrl", "organizationName", "sanctuaryName", "venueName", "venueAddress", "googleMapsUrl", "updatedAt"]
+    },
+    "WednesdaySession": {
+      "title": "WednesdaySession",
+      "description": "Weekly Kinet Hiwot Wednesday session schedule.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "weekLabel": { "type": "string", "maxLength": 100 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "theme": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 1200 },
+        "date": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "time": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "facilitator": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "venue": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "mapLink": { "type": "string", "maxLength": 500 },
+        "capacity": { "type": "number" },
+        "registeredCount": { "type": "number" },
+        "priceEtb": { "type": "number" },
+        "published": { "type": "boolean" },
+        "posterUrl": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "theme", "date", "time", "facilitator", "venue", "capacity", "registeredCount", "priceEtb", "published", "updatedAt"]
+    },
+    "WednesdayPackage": {
+      "title": "WednesdayPackage",
+      "description": "Pass pricing tier for Wednesday sessions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tier": { "type": "string", "enum": ["Single", "Weekly", "Monthly"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "priceEtb": { "type": "number" },
+        "cadenceLabel": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "audienceLabel": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "benefits": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tier", "name", "priceEtb", "cadenceLabel", "audienceLabel", "benefits", "updatedAt"]
+    },
+    "KhulProduct": {
+      "title": "KhulProduct",
+      "description": "Product in the Khul Life wellness catalog.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "category": { "type": "string", "enum": ["Journals & Books", "Herbal Blends", "Practice Tools", "Atmosphere"] },
+        "priceEtb": { "type": "number" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "inStock": { "type": "boolean" },
+        "visualKey": { "type": "string", "enum": ["journal", "tea", "cushion", "chime", "book", "candle", "custom"] },
+        "customImageUrl": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "category", "priceEtb", "description", "inStock", "visualKey", "updatedAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Home feed announcement or mindful reflection published by Khul Admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "category": { "type": "string", "enum": ["Announcement", "Self-Awareness", "Community Update"] },
+        "body": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "publishedAt": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "author": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "category", "body", "publishedAt", "author", "updatedAt"]
+    },
+    "WeeklyGameConfig": {
+      "title": "WeeklyGameConfig",
+      "description": "Active Weekly Game practice configuration.",
+      "type": "object",
+      "properties": {
+        "weekLabel": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "prompt": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "checklistLabel": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "durationLabel": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "rewardNote": { "type": "string", "maxLength": 400 },
+        "imageUrl": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["weekLabel", "title", "prompt", "checklistLabel", "durationLabel", "updatedAt"]
+    },
+    "ReflectionWord": {
+      "title": "ReflectionWord",
+      "description": "Bilingual Khul Virtue Gift slip card.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "word": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "amharicWord": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "reflection": { "type": "string", "minLength": 1, "maxLength": 600 },
+        "amharicReflection": { "type": "string", "minLength": 1, "maxLength": 600 },
+        "practiceHint": { "type": "string", "maxLength": 300 },
+        "cardTheme": { "type": "string", "enum": ["orange", "green", "yellow"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "word", "amharicWord", "reflection", "amharicReflection", "cardTheme", "updatedAt"]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Public-safe consistency streak display entry (no PII).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "activePackage": { "type": "string", "enum": ["Single", "Weekly", "Monthly"] },
+        "currentStreak": { "type": "number" },
+        "totalDaysPracticed": { "type": "number" },
+        "weekDaysCompleted": { "type": "array" },
+        "awardedBadge": { "type": "string", "maxLength": 120 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "activePackage", "currentStreak", "totalDaysPracticed", "weekDaysCompleted", "updatedAt"]
+    },
+    "MemberPrivateProfile": {
+      "title": "MemberPrivateProfile",
+      "description": "Private member profile containing email and personal intention.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "email": { "type": "string", "minLength": 3, "maxLength": 160 },
+        "stillnessIntention": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email", "updatedAt"]
+    },
+    "SessionRegistration": {
+      "title": "SessionRegistration",
+      "description": "Member reservation for a Wednesday Kinet Hiwot session.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "memberEmail": { "type": "string", "minLength": 3, "maxLength": 160 },
+        "memberPhone": { "type": "string", "minLength": 5, "maxLength": 40 },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionTitle": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "sessionDate": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "packageTier": { "type": "string", "enum": ["Single", "Weekly", "Monthly"] },
+        "amountEtb": { "type": "number" },
+        "passCode": { "type": "string", "minLength": 4, "maxLength": 40 },
+        "attendanceStatus": { "type": "string", "enum": ["Confirmed", "Checked In", "Pending"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "memberName", "memberEmail", "memberPhone", "sessionId", "sessionTitle", "sessionDate", "packageTier", "amountEtb", "passCode", "attendanceStatus", "createdAt", "updatedAt"]
+    },
+    "StoreOrder": {
+      "title": "StoreOrder",
+      "description": "Khul Life Store reservation order.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "customerPhone": { "type": "string", "minLength": 5, "maxLength": 40 },
+        "fulfillmentMethod": { "type": "string", "enum": ["Center Pickup (Bole Rwanda)", "Addis Delivery"] },
+        "deliveryAddress": { "type": "string", "maxLength": 300 },
+        "items": { "type": "array" },
+        "totalEtb": { "type": "number" },
+        "status": { "type": "string", "enum": ["Reserved", "Ready for Pickup", "Out for Delivery", "Completed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "customerName", "customerPhone", "fulfillmentMethod", "items", "totalEtb", "status", "createdAt", "updatedAt"]
+    },
+    "CorporateInquiry": {
+      "title": "CorporateInquiry",
+      "description": "Organization request for Khul Corporate wellbeing programs.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "organizationName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "contactName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "contactEmail": { "type": "string", "minLength": 3, "maxLength": 160 },
+        "teamSize": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "programInterest": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "goals": { "type": "string", "maxLength": 1500 },
+        "status": { "type": "string", "enum": ["New Inquiry", "Discovery Scheduled", "Proposal Sent"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "organizationName", "contactName", "contactEmail", "teamSize", "programInterest", "status", "createdAt", "updatedAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Granted Khul Admin privilege record.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "minLength": 3, "maxLength": 160 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/public_config/brand": {
+      "schema": { "$ref": "#/entities/BrandSettings" },
+      "description": "Public brand logo and venue settings editable only by admins."
+    },
+    "/public_config/weeklyGame": {
+      "schema": { "$ref": "#/entities/WeeklyGameConfig" },
+      "description": "Active Weekly Game challenge configuration editable only by admins."
+    },
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/WednesdaySession" },
+      "description": "Wednesday Kinet Hiwot sessions editable by admins and readable by members."
+    },
+    "/packages/{packageId}": {
+      "schema": { "$ref": "#/entities/WednesdayPackage" },
+      "description": "Session package tiers editable by admins and readable by members."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/KhulProduct" },
+      "description": "Khul Life wellness store catalog editable by admins and readable by members."
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Home feed announcements published by admins and readable by members."
+    },
+    "/virtue_gifts/{wordId}": {
+      "schema": { "$ref": "#/entities/ReflectionWord" },
+      "description": "Bilingual Khul Virtue Gift slip cards editable by admins and readable by members."
+    },
+    "/leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Public-safe consistency streak entries without PII."
+    },
+    "/members/{userId}": {
+      "schema": { "$ref": "#/entities/MemberPrivateProfile" },
+      "description": "Private member profile PII restricted to owner and admins."
+    },
+    "/registrations/{regId}": {
+      "schema": { "$ref": "#/entities/SessionRegistration" },
+      "description": "Member Wednesday session registrations restricted to owner and admins."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/StoreOrder" },
+      "description": "Member Khul Life store orders restricted to owner and admins."
+    },
+    "/corporate_inquiries/{inquiryId}": {
+      "schema": { "$ref": "#/entities/CorporateInquiry" },
+      "description": "Corporate training inquiries restricted to owner and admins."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Admin role directory restricted to owner read and admin writes."
+    }
+  }
+}
