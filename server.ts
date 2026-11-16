@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express, {Response} from 'express';
+import express, {type Response} from 'express';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import {
@@ -33,7 +33,7 @@ import {
   updateMemberProfileInDb,
 } from './src/db/users.ts';
 import {
-  AuthRequest,
+  type AuthRequest,
   optionalAuth,
   requireAdmin,
   requireAuth,

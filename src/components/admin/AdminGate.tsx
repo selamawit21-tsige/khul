@@ -34,11 +34,28 @@ export const AdminGate: React.FC<AdminGateProps> = ({
     try {
       await onSignIn();
     } catch (err) {
-      setAuthError(
-        err instanceof Error
-          ? err.message
-          : 'Could not complete Google sign-in. Please allow popups and try again.',
-      );
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as {code?: unknown}).code ?? '')
+          : '';
+      if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+        setAuthError(
+          `This deployed domain (${host}) is not authorized in Firebase Authentication yet. Add "${host}" under Firebase Console → Authentication → Settings → Authorized domains, then sign in again.`,
+        );
+      } else if (code === 'auth/popup-blocked') {
+        setAuthError(
+          'Your browser blocked the Google sign-in popup. Please allow popups for this site and click Sign In again.',
+        );
+      } else if (code === 'auth/popup-closed-by-user') {
+        setAuthError('Sign-in popup was closed before completing login. Please try again.');
+      } else {
+        setAuthError(
+          err instanceof Error
+            ? err.message
+            : 'Could not complete Google sign-in. Please allow popups and try again.',
+        );
+      }
     } finally {
       setBusy(false);
     }

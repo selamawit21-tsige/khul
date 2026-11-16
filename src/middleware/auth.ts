@@ -1,6 +1,6 @@
 import {eq} from 'drizzle-orm';
-import {NextFunction, Request, Response} from 'express';
-import {DecodedIdToken} from 'firebase-admin/auth';
+import type {NextFunction, Request, Response} from 'express';
+import type {DecodedIdToken} from 'firebase-admin/auth';
 import {db} from '../db/index.ts';
 import {admins} from '../db/schema.ts';
 import {adminAuth} from '../lib/firebase-admin.ts';

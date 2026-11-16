@@ -1,4 +1,4 @@
-import {SanctuaryState} from '../types/khul';
+import type {SanctuaryState} from '../types/khul.ts';
 
 export const INITIAL_SANCTUARY_STATE: SanctuaryState = {
   brand: {
