@@ -4,7 +4,7 @@
   "outputDirectory": "dist",
   "headers": [
     {
-      "source": "/(index\\.html|sw\\.js|manifest\\.webmanifest)",
+      "source": "/(index\\.html|sw\\.js|registerSW\\.js|manifest\\.webmanifest)",
       "headers": [
         {
           "key": "Cache-Control",
