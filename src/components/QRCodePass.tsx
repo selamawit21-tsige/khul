@@ -24,7 +24,7 @@ export const QRMatrixSVG: React.FC<{code: string; className?: string}> = ({
 }) => {
   const matrix = useMemo(() => buildScannableQrMatrix(code), [code]);
   const size = matrix.length;
-  const quietZone = 2;
+  const quietZone = 3;
   const totalSize = size + quietZone * 2;
 
   return (
@@ -45,7 +45,7 @@ export const QRMatrixSVG: React.FC<{code: string; className?: string}> = ({
               y={r + quietZone}
               width={1}
               height={1}
-              fill="#1F3A3D"
+              fill="#000000"
             />
           ) : null,
         ),
@@ -73,8 +73,8 @@ export const QRPassModal: React.FC<QRPassModalProps> = ({
     try {
       const dataUrl = await QRCode.toDataURL(registration.passCode, {
         width: 512,
-        margin: 3,
-        color: {dark: '#1F3A3D', light: '#FFFFFF'},
+        margin: 4,
+        color: {dark: '#000000', light: '#FFFFFF'},
       });
       const link = document.createElement('a');
       link.href = dataUrl;

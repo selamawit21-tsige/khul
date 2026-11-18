@@ -6,6 +6,7 @@ import {
   CameraOff,
   CheckCircle2,
   QrCode,
+  RefreshCw,
   ScanLine,
   Upload,
   X,
@@ -25,6 +26,16 @@ interface QRCheckInModalProps {
   onClose: () => void;
 }
 
+interface BarcodeDetectorLike {
+  detect: (source: ImageBitmapSource) => Promise<Array<{rawValue?: string}>>;
+}
+
+declare global {
+  interface Window {
+    BarcodeDetector?: new (options?: {formats?: string[]}) => BarcodeDetectorLike;
+  }
+}
+
 export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
   open,
   registrations,
@@ -36,9 +47,16 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastScannedRef = useRef<{code: string; at: number}>({code: '', at: 0});
+  const processingRef = useRef(false);
+  const detectingRef = useRef(false);
+  const onCheckInPassRef = useRef(onCheckInPass);
+  const barcodeDetectorRef = useRef<BarcodeDetectorLike | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  onCheckInPassRef.current = onCheckInPass;
+
   const [cameraActive, setCameraActive] = useState(false);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
   const [processing, setProcessing] = useState(false);
@@ -48,6 +66,16 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
   const checkedInCount = registrations.filter(
     (r) => r.attendanceStatus === 'Checked In',
   ).length;
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.BarcodeDetector) {
+      try {
+        barcodeDetectorRef.current = new window.BarcodeDetector({formats: ['qr_code']});
+      } catch {
+        barcodeDetectorRef.current = null;
+      }
+    }
+  }, []);
 
   const stopCamera = useCallback(() => {
     if (rafRef.current !== null) {
@@ -63,106 +91,183 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    detectingRef.current = false;
     setCameraActive(false);
   }, []);
 
-  const handleDecodedCode = useCallback(
-    async (rawCode: string, force = false) => {
-      const trimmed = rawCode.trim();
-      if (!trimmed || processing) return;
+  const handleDecodedCode = useCallback(async (rawCode: string, force = false) => {
+    const trimmed = rawCode.trim();
+    if (!trimmed || processingRef.current) return;
 
-      const now = Date.now();
-      if (
-        !force &&
-        lastScannedRef.current.code === trimmed &&
-        now - lastScannedRef.current.at < 2500
-      ) {
-        return;
+    const now = Date.now();
+    if (
+      !force &&
+      lastScannedRef.current.code === trimmed &&
+      now - lastScannedRef.current.at < 2500
+    ) {
+      return;
+    }
+    lastScannedRef.current = {code: trimmed, at: now};
+
+    processingRef.current = true;
+    setProcessing(true);
+    try {
+      const res = await onCheckInPassRef.current(trimmed);
+      setResult(res);
+      if (res.registration && res.status === 'checked-in') {
+        setRecentCheckIns((prev) => {
+          const filtered = prev.filter((item) => item.id !== res.registration!.id);
+          return [res.registration!, ...filtered].slice(0, 5);
+        });
       }
-      lastScannedRef.current = {code: trimmed, at: now};
+    } finally {
+      processingRef.current = false;
+      setProcessing(false);
+    }
+  }, []);
 
-      setProcessing(true);
-      try {
-        const res = await onCheckInPass(trimmed);
-        setResult(res);
-        if (res.registration && res.status === 'checked-in') {
-          setRecentCheckIns((prev) => {
-            const filtered = prev.filter((item) => item.id !== res.registration!.id);
-            return [res.registration!, ...filtered].slice(0, 5);
-          });
-        }
-      } finally {
-        setProcessing(false);
-      }
-    },
-    [onCheckInPass, processing],
-  );
+  const decodeCanvasWithJsQR = (
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+  ): string | null => {
+    // 1. Scan full frame
+    const full = ctx.getImageData(0, 0, width, height);
+    const fullHit = jsQR(full.data, full.width, full.height, {
+      inversionAttempts: 'attemptBoth',
+    });
+    if (fullHit?.data) return fullHit.data;
 
-  const scanFrame = useCallback(() => {
+    // 2. Scan center 65% crop (improves detection when QR fills viewfinder)
+    const cropSize = Math.floor(Math.min(width, height) * 0.65);
+    if (cropSize >= 120) {
+      const sx = Math.floor((width - cropSize) / 2);
+      const sy = Math.floor((height - cropSize) / 2);
+      const center = ctx.getImageData(sx, sy, cropSize, cropSize);
+      const centerHit = jsQR(center.data, center.width, center.height, {
+        inversionAttempts: 'attemptBoth',
+      });
+      if (centerHit?.data) return centerHit.data;
+    }
+
+    return null;
+  };
+
+  const scanFrame = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !streamRef.current) return;
 
-    if (video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
-      const ctx = canvas.getContext('2d', {willReadFrequently: true});
-      if (ctx) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const decoded = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'dontInvert',
-        });
-        if (decoded?.data) {
-          void handleDecodedCode(decoded.data, false);
+    if (
+      !detectingRef.current &&
+      !processingRef.current &&
+      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      video.videoWidth > 0 &&
+      video.videoHeight > 0
+    ) {
+      detectingRef.current = true;
+      try {
+        let decodedText: string | null = null;
+
+        // Try native hardware-accelerated BarcodeDetector first when supported
+        if (barcodeDetectorRef.current) {
+          try {
+            const codes = await barcodeDetectorRef.current.detect(video);
+            decodedText = codes.find((c) => c.rawValue)?.rawValue ?? null;
+          } catch {
+            // Fall back to jsQR below
+          }
         }
+
+        // Fall back to jsQR software decoder
+        if (!decodedText) {
+          const maxDim = 960;
+          const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
+          const targetW = Math.max(1, Math.round(video.videoWidth * scale));
+          const targetH = Math.max(1, Math.round(video.videoHeight * scale));
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d', {willReadFrequently: true});
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, targetW, targetH);
+            decodedText = decodeCanvasWithJsQR(ctx, targetW, targetH);
+          }
+        }
+
+        if (decodedText) {
+          await handleDecodedCode(decodedText, false);
+        }
+      } finally {
+        detectingRef.current = false;
       }
     }
 
-    rafRef.current = requestAnimationFrame(scanFrame);
+    if (streamRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        void scanFrame();
+      });
+    }
   }, [handleDecodedCode]);
 
-  const startCamera = useCallback(async () => {
-    setCameraError(null);
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError(
-        'Live camera access is unavailable in this browser. Use Upload QR Image or enter the Pass Code below.',
-      );
-      return;
-    }
-
-    try {
-      stopCamera();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {facingMode: {ideal: 'environment'}},
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+  const startCamera = useCallback(
+    async (mode: 'environment' | 'user' = facingMode) => {
+      setCameraError(null);
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError(
+          'Live camera access is unavailable in this browser. Use Upload QR Image or enter the Pass Code below.',
+        );
+        return;
       }
-      setCameraActive(true);
-      rafRef.current = requestAnimationFrame(scanFrame);
-    } catch {
-      setCameraError(
-        'Camera permission was declined or no camera was detected. You can upload a QR screenshot or type the Pass Code below.',
-      );
-      setCameraActive(false);
-    }
-  }, [scanFrame, stopCamera]);
 
+      try {
+        stopCamera();
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: {ideal: mode},
+            width: {ideal: 1280},
+            height: {ideal: 720},
+          },
+          audio: false,
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setCameraActive(true);
+        rafRef.current = requestAnimationFrame(() => {
+          void scanFrame();
+        });
+      } catch {
+        setCameraError(
+          'Camera permission was declined or no camera was detected. You can upload a QR screenshot or type the Pass Code below.',
+        );
+        setCameraActive(false);
+      }
+    },
+    [facingMode, scanFrame, stopCamera],
+  );
+
+  // Only start/stop camera when modal opens/closes (never restart on registration updates)
   useEffect(() => {
     if (open) {
       setResult(null);
-      void startCamera();
+      lastScannedRef.current = {code: '', at: 0};
+      void startCamera(facingMode);
     } else {
       stopCamera();
     }
     return () => {
       stopCamera();
     };
-  }, [open, startCamera, stopCamera]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const handleSwitchCamera = () => {
+    const nextMode = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextMode);
+    void startCamera(nextMode);
+  };
 
   const handleUploadQrImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -174,17 +279,16 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
       const img = new Image();
       img.onload = () => {
         const canvas = canvasRef.current ?? document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
+        const maxDim = 1200;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
         const ctx = canvas.getContext('2d', {willReadFrequently: true});
         if (!ctx) return;
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const decoded = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'attemptBoth',
-        });
-        if (decoded?.data) {
-          void handleDecodedCode(decoded.data, true);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const decoded = decodeCanvasWithJsQR(ctx, canvas.width, canvas.height);
+        if (decoded) {
+          void handleDecodedCode(decoded, true);
         } else {
           setResult({
             status: 'not-found',
@@ -246,13 +350,16 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
 
         {/* Body */}
         <div className="p-5 sm:p-6 space-y-5 overflow-y-auto">
-          {/* Camera Viewfinder */}
+          {/* Camera Viewfinder - keep video mounted & visible (opacity-0 when inactive so play() never pauses on display:none) */}
           <div className="relative rounded-2xl overflow-hidden bg-[#122224] border border-[#2C4B4E] aspect-[4/3] max-h-64 w-full flex items-center justify-center">
             <video
               ref={videoRef}
+              autoPlay
               playsInline
               muted
-              className={`w-full h-full object-cover ${cameraActive ? 'block' : 'hidden'}`}
+              className={`w-full h-full object-cover transition-opacity ${
+                cameraActive ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              }`}
             />
             <canvas ref={canvasRef} className="hidden" />
 
@@ -260,20 +367,20 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                 <div className="w-44 h-44 rounded-2xl border-2 border-[#F1931E] shadow-[0_0_0_9999px_rgba(18,34,36,0.35)] relative">
                   <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 whitespace-nowrap text-[11px] font-medium text-white bg-[#1F3A3D]/90 px-2.5 py-0.5 rounded-md">
-                    Point camera at guest QR pass
+                    Hold QR pass steady inside frame
                   </span>
                 </div>
               </div>
             ) : (
-              <div className="p-6 text-center space-y-3 max-w-sm">
+              <div className="absolute inset-0 p-6 flex flex-col items-center justify-center text-center space-y-3">
                 <CameraOff className="w-8 h-8 text-[#F1931E] mx-auto" />
-                <p className="text-xs text-[#D6DED9] leading-relaxed">
+                <p className="text-xs text-[#D6DED9] leading-relaxed max-w-sm">
                   {cameraError ?? 'Starting camera scanner...'}
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   <button
                     type="button"
-                    onClick={() => void startCamera()}
+                    onClick={() => void startCamera(facingMode)}
                     className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Camera className="w-3.5 h-3.5" />
@@ -293,6 +400,14 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
 
             {cameraActive && (
               <div className="absolute top-3 right-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSwitchCamera}
+                  className="min-h-[34px] px-2.5 py-1 rounded-lg bg-black/55 hover:bg-black/75 text-white text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Flip</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
