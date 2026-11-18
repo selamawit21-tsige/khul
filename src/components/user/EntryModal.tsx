@@ -1,6 +1,5 @@
 import React, {useEffect, useState} from 'react';
-import {LogIn, LogOut, ShieldCheck, UserCheck, X} from 'lucide-react';
-import {User} from 'firebase/auth';
+import {ShieldCheck, UserCheck, X} from 'lucide-react';
 import {AppRole, BrandSettings, CommunityMember} from '../../types/khul';
 import {KhulLogo} from '../KhulLogo';
 
@@ -8,11 +7,7 @@ interface EntryModalProps {
   open: boolean;
   brand: BrandSettings;
   member: CommunityMember;
-  authUser: User | null;
-  isAdmin: boolean;
   onUpdateProfile: (name: string, email: string) => void;
-  onSignIn: () => Promise<User>;
-  onSignOut: () => Promise<void>;
   onSelectRole: (role: AppRole) => void;
   onClose: () => void;
 }
@@ -21,22 +16,17 @@ export const EntryModal: React.FC<EntryModalProps> = ({
   open,
   brand,
   member,
-  authUser,
-  isAdmin,
   onUpdateProfile,
-  onSignIn,
-  onSignOut,
   onSelectRole,
   onClose,
 }) => {
   const [name, setName] = useState(member.name);
   const [email, setEmail] = useState(member.email);
-  const [signingIn, setSigningIn] = useState(false);
 
   useEffect(() => {
     setName(member.name);
-    setEmail(authUser?.email || member.email);
-  }, [member.name, member.email, authUser?.email]);
+    setEmail(member.email);
+  }, [member.name, member.email]);
 
   if (!open) return null;
 
@@ -50,15 +40,6 @@ export const EntryModal: React.FC<EntryModalProps> = ({
     onUpdateProfile(name, email);
     onSelectRole('admin');
     onClose();
-  };
-
-  const handleGoogleSignIn = async () => {
-    setSigningIn(true);
-    try {
-      await onSignIn();
-    } finally {
-      setSigningIn(false);
-    }
   };
 
   return (
@@ -85,51 +66,11 @@ export const EntryModal: React.FC<EntryModalProps> = ({
             Welcome to {brand.sanctuaryName}
           </h2>
           <p className="mt-1.5 text-xs text-[#5B635E]">
-            Personalize your member profile or sign in with Google to sync passes and streaks across devices.
+            Personalize your member profile or switch directly to the Admin Portal.
           </p>
         </div>
 
-        {/* Google Account Connection */}
-        <div className="mt-5 rounded-xl bg-white border border-[#E5DFD3] p-3.5 flex items-center justify-between gap-3">
-          {authUser ? (
-            <>
-              <div className="min-w-0">
-                <p className="text-[11px] font-medium text-[#4A6B5D]">
-                  {isAdmin ? 'Verified Khul Admin' : 'Signed-in Member'}
-                </p>
-                <p className="text-xs font-semibold text-[#1F3A3D] truncate">{authUser.email}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void onSignOut()}
-                className="min-h-[36px] px-3 py-1.5 rounded-lg border border-[#DDD5C7] hover:bg-[#FAF8F5] text-xs font-medium text-[#49504C] inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Sign Out</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-[#1F3A3D]">Sync with Google</p>
-                <p className="text-[11px] text-[#5B635E]">
-                  Save QR passes, orders &amp; admin access
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={signingIn}
-                onClick={() => void handleGoogleSignIn()}
-                className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-[#1F3A3D] hover:bg-[#162B2D] text-[#FAF8F5] text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
-              >
-                <LogIn className="w-3.5 h-3.5 text-[#F1931E]" />
-                <span>{signingIn ? 'Connecting...' : 'Sign In'}</span>
-              </button>
-            </>
-          )}
-        </div>
-
-        <div className="mt-4 space-y-3.5">
+        <div className="mt-5 space-y-3.5">
           <div>
             <label className="block text-xs font-medium text-[#49504C] mb-1">
               Your Name

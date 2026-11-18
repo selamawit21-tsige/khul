@@ -11,13 +11,11 @@ import {
   Plus,
   RotateCcw,
   Search,
-  ShieldCheck,
   ShoppingBag,
   Sparkles,
   Trash2,
   Users,
 } from 'lucide-react';
-import {PRIMARY_ADMIN_EMAIL} from '../../firebase';
 import {AdminTab, KhulProduct, ProductCategory, ReflectionWord, VirtueCardTheme, WednesdaySession} from '../../types/khul';
 import {KhulLogo} from '../KhulLogo';
 import {useSanctuaryStore} from '../../hooks/useSanctuaryStore';
@@ -78,11 +76,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [gameDraft, setGameDraft] = useState(state.weeklyGame);
   const [gameSaved, setGameSaved] = useState(false);
   const [sessionSavedMsg, setSessionSavedMsg] = useState(false);
-
-  // Team Admin Grant form state
-  const [newAdminUid, setNewAdminUid] = useState('');
-  const [newAdminEmail, setNewAdminEmail] = useState('');
-  const [adminGrantMsg, setAdminGrantMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setGameDraft(state.weeklyGame);
@@ -1176,86 +1169,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   Restore Default Khul Logo
                 </button>
               </div>
-            </section>
-
-            {/* Team Admin Privileges */}
-            <section className="rounded-2xl bg-white border border-[#E7E1D6] p-6 space-y-4">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-[#1F3A3D] inline-flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-[#F1931E]" />
-                    <span>Authorized Khul Admin Privileges</span>
-                  </h2>
-                  <p className="text-xs text-[#5B635E] mt-1">
-                    Only listed administrators can access the Admin Portal and publish live updates to User pages.
-                  </p>
-                </div>
-                {adminGrantMsg && (
-                  <span className="text-xs font-medium text-[#4A6B5D]">{adminGrantMsg}</span>
-                )}
-              </div>
-
-              <div className="rounded-xl bg-[#FAF8F5] border border-[#E7E1D6] p-3.5 flex items-center justify-between text-xs">
-                <div>
-                  <p className="font-semibold text-[#1F3A3D]">{PRIMARY_ADMIN_EMAIL}</p>
-                  <p className="text-[#5B635E]">Primary Khul Administrator</p>
-                </div>
-                <span className="font-medium text-[#4A6B5D]">Active</span>
-              </div>
-
-              {store.adminRecords.length > 0 && (
-                <div className="divide-y divide-[#F0EBE1]">
-                  {store.adminRecords.map((rec) => (
-                    <div key={rec.uid} className="py-2.5 flex items-center justify-between gap-3 text-xs">
-                      <div>
-                        <p className="font-semibold text-[#1F3A3D]">{rec.email}</p>
-                        <p className="font-mono text-[11px] text-[#5B635E]">UID: {rec.uid}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void store.revokeAdminByUid(rec.uid)}
-                        className="text-red-700 hover:underline font-medium cursor-pointer"
-                      >
-                        Revoke
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!newAdminUid.trim() || !newAdminEmail.trim()) return;
-                  await store.grantAdminByUid(newAdminUid, newAdminEmail);
-                  setNewAdminUid('');
-                  setNewAdminEmail('');
-                  setAdminGrantMsg('Admin privilege granted');
-                  window.setTimeout(() => setAdminGrantMsg(null), 2500);
-                }}
-                className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1"
-              >
-                <input
-                  type="text"
-                  value={newAdminUid}
-                  onChange={(e) => setNewAdminUid(e.target.value)}
-                  placeholder="Colleague Firebase UID"
-                  className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#DDD5C7] bg-[#FAF8F5] text-xs font-mono"
-                />
-                <input
-                  type="email"
-                  value={newAdminEmail}
-                  onChange={(e) => setNewAdminEmail(e.target.value)}
-                  placeholder="Colleague Google Email"
-                  className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#DDD5C7] bg-[#FAF8F5] text-xs"
-                />
-                <button
-                  type="submit"
-                  className="min-h-[40px] px-4 py-1.5 rounded-xl bg-[#1F3A3D] hover:bg-[#162B2D] text-[#FAF8F5] text-xs font-semibold cursor-pointer"
-                >
-                  Grant Admin Access
-                </button>
-              </form>
             </section>
           </div>
         )}

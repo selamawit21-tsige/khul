@@ -24,20 +24,6 @@ import {
   upsertSessionInDb,
   upsertVirtueGiftInDb,
 } from './src/db/repository.ts';
-import {
-  checkInUserTodayInDb,
-  getOrCreateUser,
-  grantAdmin,
-  listAdmins,
-  revokeAdmin,
-  updateMemberProfileInDb,
-} from './src/db/users.ts';
-import {
-  type AuthRequest,
-  optionalAuth,
-  requireAdmin,
-  requireAuth,
-} from './src/middleware/auth.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -95,85 +81,23 @@ app.get('/api/public/state', async (_req, res) => {
   }
 });
 
-// Current Signed-In User, Role & Scoped Operational Records
-app.get('/api/me', requireAuth, async (req: AuthRequest, res) => {
+// Admin Operational Records (Registrations, Store Orders, Corporate Inquiries)
+app.get('/api/admin/operations', async (_req, res) => {
   try {
-    const firebaseUser = req.user!;
-    const isAdmin = Boolean(req.isAdminUser);
-    const dbUser = await getOrCreateUser({
-      uid: firebaseUser.uid,
-      email: firebaseUser.email ?? '',
-      name: firebaseUser.name,
-      role: isAdmin ? 'admin' : 'member',
-    });
-    const operational = await getOperationalData({
-      uid: firebaseUser.uid,
-      isAdmin,
-    });
-    const adminRecords = isAdmin ? await listAdmins() : [];
-    const todayIso = new Date().toISOString().slice(0, 10);
-
-    res.json({
-      user: {
-        uid: dbUser.uid,
-        name: dbUser.name,
-        email: dbUser.email,
-        activePackage: dbUser.activePackage,
-        currentStreak: dbUser.currentStreak,
-        totalDaysPracticed: dbUser.totalDaysPracticed,
-        weekDaysCompleted: dbUser.weekDaysCompleted,
-        awardedBadge: dbUser.awardedBadge ?? undefined,
-        stillnessIntention: dbUser.stillnessIntention,
-        checkedInToday: dbUser.checkedInDate === todayIso,
-      },
-      isAdmin,
-      adminRecords,
-      ...operational,
-    });
+    await ensureSeeded(false);
+    const operational = await getOperationalData({uid: '', isAdmin: true});
+    res.json(operational);
   } catch (error) {
-    console.error('GET /api/me failed:', error);
-    res.status(500).json({error: 'Unable to synchronize your member profile.'});
+    console.error('GET /api/admin/operations failed:', error);
+    res.status(500).json({error: 'Unable to load operational records.'});
   }
 });
 
-// Authenticated Member Actions
-app.post('/api/member/profile', requireAuth, async (req: AuthRequest, res) => {
-  try {
-    const {name, email, stillnessIntention} = req.body as {
-      name?: string;
-      email?: string;
-      stillnessIntention?: string;
-    };
-    const updated = await updateMemberProfileInDb({
-      uid: req.user!.uid,
-      name,
-      email,
-      stillnessIntention,
-    });
-    broadcastStateUpdate('member-profile');
-    res.json({user: updated});
-  } catch (error) {
-    console.error('POST /api/member/profile failed:', error);
-    res.status(500).json({error: 'Unable to save profile updates.'});
-  }
-});
-
-app.post('/api/member/checkin', requireAuth, async (req: AuthRequest, res) => {
-  try {
-    const updated = await checkInUserTodayInDb(req.user!.uid);
-    broadcastStateUpdate('member-checkin');
-    res.json({user: updated});
-  } catch (error) {
-    console.error('POST /api/member/checkin failed:', error);
-    res.status(500).json({error: 'Unable to save daily check-in.'});
-  }
-});
-
-// Member Submissions (supports guest or signed-in member; associates ownerUid when signed in)
-app.post('/api/registrations', optionalAuth, async (req: AuthRequest, res) => {
+// Member Submissions
+app.post('/api/registrations', async (req, res) => {
   try {
     const reg = req.body;
-    await createRegistrationInDb(reg, req.user?.uid ?? null);
+    await createRegistrationInDb(reg, null);
     broadcastStateUpdate('registration');
     res.status(201).json({ok: true, registration: reg});
   } catch (error) {
@@ -182,10 +106,10 @@ app.post('/api/registrations', optionalAuth, async (req: AuthRequest, res) => {
   }
 });
 
-app.post('/api/orders', optionalAuth, async (req: AuthRequest, res) => {
+app.post('/api/orders', async (req, res) => {
   try {
     const order = req.body;
-    await createOrderInDb(order, req.user?.uid ?? null);
+    await createOrderInDb(order, null);
     broadcastStateUpdate('order');
     res.status(201).json({ok: true, order});
   } catch (error) {
@@ -194,10 +118,10 @@ app.post('/api/orders', optionalAuth, async (req: AuthRequest, res) => {
   }
 });
 
-app.post('/api/corporate-inquiries', optionalAuth, async (req: AuthRequest, res) => {
+app.post('/api/corporate-inquiries', async (req, res) => {
   try {
     const inquiry = req.body;
-    await createInquiryInDb(inquiry, req.user?.uid ?? null);
+    await createInquiryInDb(inquiry, null);
     broadcastStateUpdate('corporate-inquiry');
     res.status(201).json({ok: true, inquiry});
   } catch (error) {
@@ -206,8 +130,8 @@ app.post('/api/corporate-inquiries', optionalAuth, async (req: AuthRequest, res)
   }
 });
 
-// Privileged Admin Endpoints -> Sync Live to All Connected User Pages
-app.put('/api/admin/brand', requireAdmin, async (req, res) => {
+// Admin Portal Endpoints -> Persist in Cloud SQL & Broadcast Live to All User Pages
+app.put('/api/admin/brand', async (req, res) => {
   try {
     await saveBrandConfig(req.body);
     broadcastStateUpdate('brand');
@@ -218,7 +142,7 @@ app.put('/api/admin/brand', requireAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/admin/weekly-game', requireAdmin, async (req, res) => {
+app.put('/api/admin/weekly-game', async (req, res) => {
   try {
     await saveWeeklyGameConfig(req.body);
     broadcastStateUpdate('weekly-game');
@@ -229,7 +153,7 @@ app.put('/api/admin/weekly-game', requireAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/admin/sessions/:id', requireAdmin, async (req, res) => {
+app.put('/api/admin/sessions/:id', async (req, res) => {
   try {
     await upsertSessionInDb({...req.body, id: req.params.id});
     broadcastStateUpdate('sessions');
@@ -240,7 +164,7 @@ app.put('/api/admin/sessions/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.delete('/api/admin/sessions/:id', requireAdmin, async (req, res) => {
+app.delete('/api/admin/sessions/:id', async (req, res) => {
   try {
     await deleteSessionInDb(req.params.id);
     broadcastStateUpdate('sessions');
@@ -251,7 +175,7 @@ app.delete('/api/admin/sessions/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/admin/packages/:id', requireAdmin, async (req, res) => {
+app.put('/api/admin/packages/:id', async (req, res) => {
   try {
     await upsertPackageInDb({...req.body, id: req.params.id});
     broadcastStateUpdate('packages');
@@ -262,7 +186,7 @@ app.put('/api/admin/packages/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
+app.put('/api/admin/products/:id', async (req, res) => {
   try {
     await upsertProductInDb({...req.body, id: req.params.id});
     broadcastStateUpdate('products');
@@ -273,7 +197,7 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/admin/announcements', requireAdmin, async (req, res) => {
+app.post('/api/admin/announcements', async (req, res) => {
   try {
     await insertAnnouncementInDb(req.body);
     broadcastStateUpdate('announcements');
@@ -284,7 +208,7 @@ app.post('/api/admin/announcements', requireAdmin, async (req, res) => {
   }
 });
 
-app.delete('/api/admin/announcements/:id', requireAdmin, async (req, res) => {
+app.delete('/api/admin/announcements/:id', async (req, res) => {
   try {
     await deleteAnnouncementInDb(req.params.id);
     broadcastStateUpdate('announcements');
@@ -295,7 +219,7 @@ app.delete('/api/admin/announcements/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/admin/virtue-gifts/:id', requireAdmin, async (req, res) => {
+app.put('/api/admin/virtue-gifts/:id', async (req, res) => {
   try {
     await upsertVirtueGiftInDb({...req.body, id: req.params.id});
     broadcastStateUpdate('virtue-gifts');
@@ -306,7 +230,7 @@ app.put('/api/admin/virtue-gifts/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.delete('/api/admin/virtue-gifts/:id', requireAdmin, async (req, res) => {
+app.delete('/api/admin/virtue-gifts/:id', async (req, res) => {
   try {
     await deleteVirtueGiftInDb(req.params.id);
     broadcastStateUpdate('virtue-gifts');
@@ -317,7 +241,7 @@ app.delete('/api/admin/virtue-gifts/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.patch('/api/admin/registrations/:id', requireAdmin, async (req, res) => {
+app.patch('/api/admin/registrations/:id', async (req, res) => {
   try {
     await updateRegistrationStatusInDb(req.params.id, req.body.attendanceStatus);
     broadcastStateUpdate('registrations');
@@ -328,7 +252,7 @@ app.patch('/api/admin/registrations/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.patch('/api/admin/orders/:id', requireAdmin, async (req, res) => {
+app.patch('/api/admin/orders/:id', async (req, res) => {
   try {
     await updateOrderStatusInDb(req.params.id, req.body.status);
     broadcastStateUpdate('orders');
@@ -339,7 +263,7 @@ app.patch('/api/admin/orders/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.patch('/api/admin/corporate-inquiries/:id', requireAdmin, async (req, res) => {
+app.patch('/api/admin/corporate-inquiries/:id', async (req, res) => {
   try {
     await updateInquiryStatusInDb(req.params.id, req.body.status);
     broadcastStateUpdate('corporate-inquiries');
@@ -350,7 +274,7 @@ app.patch('/api/admin/corporate-inquiries/:id', requireAdmin, async (req, res) =
   }
 });
 
-app.put('/api/admin/leaderboard/:id/badge', requireAdmin, async (req, res) => {
+app.put('/api/admin/leaderboard/:id/badge', async (req, res) => {
   try {
     await awardMemberBadgeInDb(req.params.id, req.body.badge || null);
     broadcastStateUpdate('leaderboard');
@@ -361,28 +285,7 @@ app.put('/api/admin/leaderboard/:id/badge', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/admin/admins', requireAdmin, async (req, res) => {
-  try {
-    const {uid, email} = req.body as {uid: string; email: string};
-    const record = await grantAdmin(uid.trim(), email.trim());
-    res.status(201).json({record});
-  } catch (error) {
-    console.error('POST /api/admin/admins failed:', error);
-    res.status(500).json({error: 'Unable to grant admin privileges.'});
-  }
-});
-
-app.delete('/api/admin/admins/:uid', requireAdmin, async (req, res) => {
-  try {
-    await revokeAdmin(req.params.uid);
-    res.json({ok: true});
-  } catch (error) {
-    console.error('DELETE /api/admin/admins failed:', error);
-    res.status(500).json({error: 'Unable to revoke admin privileges.'});
-  }
-});
-
-app.post('/api/admin/reset-defaults', requireAdmin, async (_req, res) => {
+app.post('/api/admin/reset-defaults', async (_req, res) => {
   try {
     await ensureSeeded(true);
     broadcastStateUpdate('reset-defaults');

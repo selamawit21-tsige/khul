@@ -1,12 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {User, onAuthStateChanged} from 'firebase/auth';
 import {INITIAL_SANCTUARY_STATE} from '../data/initialData';
-import {
-  PRIMARY_ADMIN_EMAIL,
-  auth,
-  signInWithGoogle,
-  signOutUser,
-} from '../firebase';
 import {
   Announcement,
   BrandSettings,
@@ -24,12 +17,7 @@ import {
 } from '../types/khul';
 
 const STORAGE_KEY = 'khul_sanctuary_state_v7';
-
-export interface AdminRecordItem {
-  uid: string;
-  email: string;
-  role: 'admin';
-}
+const BROADCAST_CHANNEL_NAME = 'khul_world_sync';
 
 function loadInitialState(): SanctuaryState {
   if (typeof window === 'undefined') return INITIAL_SANCTUARY_STATE;
@@ -59,21 +47,7 @@ interface PublicStateResponse {
   members: CommunityMember[];
 }
 
-interface MeResponse {
-  user: {
-    uid: string;
-    name: string;
-    email: string;
-    activePackage: PackageTier;
-    currentStreak: number;
-    totalDaysPracticed: number;
-    weekDaysCompleted: boolean[];
-    awardedBadge?: string;
-    stillnessIntention: string;
-    checkedInToday: boolean;
-  };
-  isAdmin: boolean;
-  adminRecords: AdminRecordItem[];
+interface OperationsResponse {
   registrations: SessionRegistration[];
   orders: StoreOrder[];
   corporateInquiries: CorporateInquiry[];
@@ -81,77 +55,104 @@ interface MeResponse {
 
 export function useSanctuaryStore() {
   const [state, setState] = useState<SanctuaryState>(loadInitialState);
-  const [authUser, setAuthUser] = useState<User | null>(null);
-  const [authReady, setAuthReady] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminCheckDone, setAdminCheckDone] = useState(false);
   const [cloudSynced, setCloudSynced] = useState(false);
   const [lastCloudSaveAt, setLastCloudSaveAt] = useState<string | null>(null);
-  const [adminRecords, setAdminRecords] = useState<AdminRecordItem[]>([]);
+  const channelRef = useRef<BroadcastChannel | null>(null);
 
-  const authUserRef = useRef<User | null>(null);
-
-  // Persist local cache cleanly
-  useEffect(() => {
+  const persistAndBroadcast = useCallback((nextState: SanctuaryState) => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
     } catch {
-      // Ignore quota errors cleanly
+      // Ignore storage quota errors
     }
-  }, [state]);
-
-  const getAuthHeaders = useCallback(async (userOverride?: User | null): Promise<Record<string, string>> => {
-    const targetUser = userOverride !== undefined ? userOverride : authUserRef.current;
-    if (!targetUser) return {};
     try {
-      const token = await targetUser.getIdToken();
-      return {Authorization: `Bearer ${token}`};
+      channelRef.current?.postMessage({type: 'local-sync', state: nextState});
     } catch {
-      return {};
+      // Ignore BroadcastChannel errors
     }
   }, []);
 
-  const apiRequest = useCallback(
-    async (
-      url: string,
-      options?: RequestInit & {requireToken?: boolean; userOverride?: User | null},
-    ) => {
-      const headers: Record<string, string> = {
+  const updateLocalState = useCallback(
+    (updater: (prev: SanctuaryState) => SanctuaryState, shouldBroadcast = true) => {
+      setState((prev) => {
+        const next = updater(prev);
+        if (shouldBroadcast) {
+          persistAndBroadcast(next);
+        } else {
+          try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+          } catch {
+            // Ignore quota errors
+          }
+        }
+        return next;
+      });
+    },
+    [persistAndBroadcast],
+  );
+
+  // Sync across open browser tabs/windows immediately (Admin tab -> User tab)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    if ('BroadcastChannel' in window) {
+      const ch = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+      channelRef.current = ch;
+      ch.onmessage = (event) => {
+        const msg = event.data as {type?: string; state?: SanctuaryState};
+        if (msg?.type === 'local-sync' && msg.state) {
+          setState(msg.state);
+        }
+      };
+    }
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue) as SanctuaryState;
+          setState(parsed);
+        } catch {
+          // ignore malformed JSON
+        }
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      channelRef.current?.close();
+      channelRef.current = null;
+    };
+  }, []);
+
+  const apiRequest = useCallback(async (url: string, options?: RequestInit) => {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
         'Content-Type': 'application/json',
         ...(options?.headers as Record<string, string> | undefined),
-      };
-      const authHeaders = await getAuthHeaders(options?.userOverride);
-      Object.assign(headers, authHeaders);
-
-      if (options?.requireToken && !headers.Authorization) {
-        throw new Error('Authentication required');
-      }
-
-      const res = await fetch(url, {
-        ...options,
-        headers,
-      });
-      if (!res.ok) {
-        let msg = `Request failed (${res.status})`;
-        try {
-          const data = (await res.json()) as {error?: string};
-          if (data?.error) msg = data.error;
-        } catch {
-          // ignore
-        }
-        throw new Error(msg);
-      }
-      return res.json();
-    },
-    [getAuthHeaders],
-  );
+      },
+    });
+    const contentType = res.headers.get('content-type') ?? '';
+    if (!res.ok) {
+      throw new Error(`Request failed (${res.status})`);
+    }
+    if (!contentType.includes('application/json')) {
+      throw new Error('Non-JSON response');
+    }
+    return res.json();
+  }, []);
 
   const fetchPublicState = useCallback(async () => {
     try {
-      const data = (await apiRequest('/api/public/state', {method: 'GET'})) as PublicStateResponse;
-      setState((prev) => {
+      const [publicData, opsData] = await Promise.all([
+        apiRequest('/api/public/state', {method: 'GET'}) as Promise<PublicStateResponse>,
+        apiRequest('/api/admin/operations', {method: 'GET'}).catch(() => null) as Promise<OperationsResponse | null>,
+      ]);
+
+      updateLocalState((prev) => {
         const currentUserId = prev.currentUserId;
-        const incomingById = new Map(data.members.map((m) => [m.id, m]));
+        const incomingById = new Map(publicData.members.map((m) => [m.id, m]));
         const existingCurrent = prev.members.find((m) => m.id === currentUserId);
         if (existingCurrent && !incomingById.has(existingCurrent.id)) {
           incomingById.set(existingCurrent.id, existingCurrent);
@@ -163,106 +164,38 @@ export function useSanctuaryStore() {
 
         return {
           ...prev,
-          brand: data.brand ?? prev.brand,
-          weeklyGame: data.weeklyGame ?? prev.weeklyGame,
-          sessions: data.sessions.length > 0 ? data.sessions : prev.sessions,
-          packages: data.packages.length > 0 ? data.packages : prev.packages,
-          products: data.products.length > 0 ? data.products : prev.products,
-          announcements: data.announcements.length > 0 ? data.announcements : prev.announcements,
+          brand: publicData.brand ?? prev.brand,
+          weeklyGame: publicData.weeklyGame ?? prev.weeklyGame,
+          sessions: publicData.sessions.length > 0 ? publicData.sessions : prev.sessions,
+          packages: publicData.packages.length > 0 ? publicData.packages : prev.packages,
+          products: publicData.products.length > 0 ? publicData.products : prev.products,
+          announcements:
+            publicData.announcements.length > 0 ? publicData.announcements : prev.announcements,
           reflectionWords:
-            data.reflectionWords.length > 0 ? data.reflectionWords : prev.reflectionWords,
+            publicData.reflectionWords.length > 0
+              ? publicData.reflectionWords
+              : prev.reflectionWords,
           members: mergedMembers.length > 0 ? mergedMembers : prev.members,
+          ...(opsData
+            ? {
+                registrations:
+                  opsData.registrations.length > 0 ? opsData.registrations : prev.registrations,
+                orders: opsData.orders.length > 0 ? opsData.orders : prev.orders,
+                corporateInquiries:
+                  opsData.corporateInquiries.length > 0
+                    ? opsData.corporateInquiries
+                    : prev.corporateInquiries,
+              }
+            : {}),
         };
-      });
+      }, false);
       setCloudSynced(true);
-    } catch (error) {
-      console.warn('Public state fetch failed, using cached state:', error);
+    } catch {
+      // Gracefully operate with localStorage + BroadcastChannel when backend is unavailable
     }
-  }, [apiRequest]);
+  }, [apiRequest, updateLocalState]);
 
-  const fetchAuthenticatedUserState = useCallback(
-    async (user: User | null) => {
-      if (!user || !user.emailVerified) {
-        setIsAdmin(false);
-        setAdminRecords([]);
-        setAdminCheckDone(true);
-        return;
-      }
-
-      const isPrimaryEmail =
-        (user.email ?? '').toLowerCase() === PRIMARY_ADMIN_EMAIL.toLowerCase();
-
-      try {
-        const me = (await apiRequest('/api/me', {
-          method: 'GET',
-          requireToken: true,
-          userOverride: user,
-        })) as MeResponse;
-
-        setIsAdmin(Boolean(me.isAdmin));
-        setAdminRecords(me.adminRecords ?? []);
-        setAdminCheckDone(true);
-
-        setState((prev) => {
-          const otherMembers = prev.members
-            .filter((m) => m.id !== me.user.uid)
-            .map((m) => ({...m, isCurrentUser: false}));
-
-          const signedInMember: CommunityMember = {
-            id: me.user.uid,
-            name: me.user.name,
-            email: me.user.email,
-            activePackage: me.user.activePackage || 'Single',
-            currentStreak: me.user.currentStreak ?? 1,
-            totalDaysPracticed: me.user.totalDaysPracticed ?? 1,
-            weekDaysCompleted:
-              me.user.weekDaysCompleted ?? [false, false, false, false, false, false, false],
-            awardedBadge: me.user.awardedBadge,
-            isCurrentUser: true,
-          };
-
-          return {
-            ...prev,
-            currentUserId: me.user.uid,
-            checkedInToday: me.user.checkedInToday || prev.checkedInToday,
-            stillnessIntention: me.user.stillnessIntention || prev.stillnessIntention,
-            members: [signedInMember, ...otherMembers],
-            registrations: me.registrations,
-            orders: me.orders,
-            corporateInquiries: me.corporateInquiries,
-          };
-        });
-        setCloudSynced(true);
-      } catch (error) {
-        console.warn('Authenticated sync failed:', error);
-        setIsAdmin(isPrimaryEmail);
-        setAdminCheckDone(true);
-      }
-    },
-    [apiRequest],
-  );
-
-  // 1. Track Firebase Auth state and sync with Cloud SQL backend
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      authUserRef.current = user;
-      setAuthUser(user);
-      setAuthReady(true);
-
-      if (!user) {
-        setIsAdmin(false);
-        setAdminRecords([]);
-        setAdminCheckDone(true);
-        return;
-      }
-
-      await fetchAuthenticatedUserState(user);
-    });
-
-    return () => unsub();
-  }, [fetchAuthenticatedUserState]);
-
-  // 2. Load Cloud SQL public catalog & subscribe to live Admin -> User updates via SSE
+  // Load backend catalog & subscribe to live Admin -> User updates via SSE
   useEffect(() => {
     void fetchPublicState();
 
@@ -274,9 +207,6 @@ export function useSanctuaryStore() {
           const parsed = JSON.parse(event.data) as {type?: string};
           if (parsed.type === 'state-updated') {
             void fetchPublicState();
-            if (authUserRef.current?.emailVerified) {
-              void fetchAuthenticatedUserState(authUserRef.current);
-            }
           }
         } catch {
           // ignore malformed SSE pings
@@ -287,9 +217,6 @@ export function useSanctuaryStore() {
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
         void fetchPublicState();
-        if (authUserRef.current?.emailVerified) {
-          void fetchAuthenticatedUserState(authUserRef.current);
-        }
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
@@ -298,7 +225,7 @@ export function useSanctuaryStore() {
       es?.close();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [fetchAuthenticatedUserState, fetchPublicState]);
+  }, [fetchPublicState]);
 
   const currentUser =
     state.members.find((m) => m.id === state.currentUserId) ?? state.members[0];
@@ -308,26 +235,11 @@ export function useSanctuaryStore() {
     setLastCloudSaveAt(new Date().toLocaleTimeString());
   }, []);
 
-  const syncCloudDefaults = useCallback(
-    async (forceOverwrite = false) => {
-      if (!isAdmin) return;
-      if (forceOverwrite) {
-        await apiRequest('/api/admin/reset-defaults', {method: 'POST', requireToken: true});
-      }
-      await fetchPublicState();
-      if (authUserRef.current?.emailVerified) {
-        await fetchAuthenticatedUserState(authUserRef.current);
-      }
-      markSavedNow();
-    },
-    [apiRequest, fetchAuthenticatedUserState, fetchPublicState, isAdmin, markSavedNow],
-  );
-
   const updateMemberName = useCallback(
     (name: string, email?: string) => {
       const cleanName = name.trim();
       if (!cleanName) return;
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         members: prev.members.map((m) =>
           m.id === prev.currentUserId
@@ -335,19 +247,8 @@ export function useSanctuaryStore() {
             : m,
         ),
       }));
-
-      if (authUserRef.current?.emailVerified) {
-        void apiRequest('/api/member/profile', {
-          method: 'POST',
-          requireToken: true,
-          body: JSON.stringify({
-            name: cleanName,
-            email: email?.trim(),
-          }),
-        }).catch((err) => console.warn('Profile save failed:', err));
-      }
     },
-    [apiRequest],
+    [updateLocalState],
   );
 
   const completeTodayPractice = useCallback((): ReflectionWord => {
@@ -356,7 +257,7 @@ export function useSanctuaryStore() {
       pool[Math.floor(Math.random() * pool.length)] ??
       INITIAL_SANCTUARY_STATE.reflectionWords[0];
 
-    setState((prev) => {
+    updateLocalState((prev) => {
       if (prev.checkedInToday) return prev;
       const todayLabel = new Date().toLocaleDateString('en-US', {
         month: 'short',
@@ -395,15 +296,8 @@ export function useSanctuaryStore() {
       };
     });
 
-    if (authUserRef.current?.emailVerified) {
-      void apiRequest('/api/member/checkin', {
-        method: 'POST',
-        requireToken: true,
-      }).catch((err) => console.warn('Check-in sync failed:', err));
-    }
-
     return word;
-  }, [apiRequest, state.reflectionWords]);
+  }, [state.reflectionWords, updateLocalState]);
 
   const drawVirtueGift = useCallback(
     (excludeIds?: string[]): ReflectionWord => {
@@ -424,7 +318,7 @@ export function useSanctuaryStore() {
         year: 'numeric',
       });
 
-      setState((prev) => {
+      updateLocalState((prev) => {
         const alreadyCollected = prev.collectedWords.some(
           (c) => c.word === word.word && c.earnedAt === todayLabel,
         );
@@ -448,7 +342,7 @@ export function useSanctuaryStore() {
 
       return word;
     },
-    [state.reflectionWords],
+    [state.reflectionWords, updateLocalState],
   );
 
   const registerWednesdaySession = useCallback(
@@ -488,7 +382,7 @@ export function useSanctuaryStore() {
         createdAt: new Date().toISOString().slice(0, 10),
       };
 
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         registrations: [registration, ...prev.registrations],
         sessions: prev.sessions.map((s) =>
@@ -511,11 +405,11 @@ export function useSanctuaryStore() {
       void apiRequest('/api/registrations', {
         method: 'POST',
         body: JSON.stringify(registration),
-      }).catch((err) => console.warn('Registration save failed:', err));
+      }).catch(() => {});
 
       return registration;
     },
-    [apiRequest, state.packages, state.sessions],
+    [apiRequest, state.packages, state.sessions, updateLocalState],
   );
 
   const submitCorporateInquiry = useCallback(
@@ -534,7 +428,7 @@ export function useSanctuaryStore() {
         status: 'New Inquiry',
         submittedAt: new Date().toISOString().slice(0, 10),
       };
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         corporateInquiries: [inquiry, ...prev.corporateInquiries],
       }));
@@ -542,38 +436,44 @@ export function useSanctuaryStore() {
       void apiRequest('/api/corporate-inquiries', {
         method: 'POST',
         body: JSON.stringify(inquiry),
-      }).catch((err) => console.warn('Corporate inquiry save failed:', err));
+      }).catch(() => {});
 
       return inquiry;
     },
-    [apiRequest],
+    [apiRequest, updateLocalState],
   );
 
-  const addToBag = useCallback((productId: string) => {
-    setState((prev) => {
-      const existing = prev.bag.find((b) => b.productId === productId);
-      if (existing) {
-        return {
-          ...prev,
-          bag: prev.bag.map((b) =>
-            b.productId === productId ? {...b, quantity: b.quantity + 1} : b,
-          ),
-        };
-      }
-      return {...prev, bag: [...prev.bag, {productId, quantity: 1}]};
-    });
-  }, []);
+  const addToBag = useCallback(
+    (productId: string) => {
+      updateLocalState((prev) => {
+        const existing = prev.bag.find((b) => b.productId === productId);
+        if (existing) {
+          return {
+            ...prev,
+            bag: prev.bag.map((b) =>
+              b.productId === productId ? {...b, quantity: b.quantity + 1} : b,
+            ),
+          };
+        }
+        return {...prev, bag: [...prev.bag, {productId, quantity: 1}]};
+      });
+    },
+    [updateLocalState],
+  );
 
-  const updateBagQuantity = useCallback((productId: string, delta: number) => {
-    setState((prev) => ({
-      ...prev,
-      bag: prev.bag
-        .map((b) =>
-          b.productId === productId ? {...b, quantity: b.quantity + delta} : b,
-        )
-        .filter((b) => b.quantity > 0),
-    }));
-  }, []);
+  const updateBagQuantity = useCallback(
+    (productId: string, delta: number) => {
+      updateLocalState((prev) => ({
+        ...prev,
+        bag: prev.bag
+          .map((b) =>
+            b.productId === productId ? {...b, quantity: b.quantity + delta} : b,
+          )
+          .filter((b) => b.quantity > 0),
+      }));
+    },
+    [updateLocalState],
+  );
 
   const checkoutBag = useCallback(
     (payload: {
@@ -610,7 +510,7 @@ export function useSanctuaryStore() {
         createdAt: new Date().toISOString().slice(0, 10),
       };
 
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         orders: [order, ...prev.orders],
         bag: [],
@@ -619,32 +519,24 @@ export function useSanctuaryStore() {
       void apiRequest('/api/orders', {
         method: 'POST',
         body: JSON.stringify(order),
-      }).catch((err) => console.warn('Order save failed:', err));
+      }).catch(() => {});
 
       return order;
     },
-    [apiRequest, state.bag, state.products],
+    [apiRequest, state.bag, state.products, updateLocalState],
   );
 
   const saveStillnessIntention = useCallback(
     (intention: string) => {
-      setState((prev) => ({...prev, stillnessIntention: intention}));
-      if (authUserRef.current?.emailVerified) {
-        void apiRequest('/api/member/profile', {
-          method: 'POST',
-          requireToken: true,
-          body: JSON.stringify({stillnessIntention: intention}),
-        }).catch((err) => console.warn('Intention save failed:', err));
-      }
+      updateLocalState((prev) => ({...prev, stillnessIntention: intention}));
     },
-    [apiRequest],
+    [updateLocalState],
   );
 
-  // --- PRIVILEGED ADMIN ACTIONS (Verified Admin Only -> Persisted in Cloud SQL -> Live SSE to User Pages) ---
+  // --- ADMIN PORTAL ACTIONS (Instant Live Sync to User Pages + Cloud SQL Persistence) ---
   const upsertSession = useCallback(
     (session: WednesdaySession) => {
-      if (!isAdmin) return;
-      setState((prev) => {
+      updateLocalState((prev) => {
         const exists = prev.sessions.some((s) => s.id === session.id);
         return {
           ...prev,
@@ -653,95 +545,80 @@ export function useSanctuaryStore() {
             : [...prev.sessions, session],
         };
       });
+      markSavedNow();
       void apiRequest(`/api/admin/sessions/${encodeURIComponent(session.id)}`, {
         method: 'PUT',
-        requireToken: true,
         body: JSON.stringify(session),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Save session failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const deleteSession = useCallback(
     (id: string) => {
-      if (!isAdmin) return;
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         sessions: prev.sessions.filter((s) => s.id !== id),
       }));
+      markSavedNow();
       void apiRequest(`/api/admin/sessions/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        requireToken: true,
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Delete session failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const updatePackagePricing = useCallback(
     (pkg: WednesdayPackage) => {
-      if (!isAdmin) return;
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         packages: prev.packages.map((p) => (p.id === pkg.id ? pkg : p)),
       }));
+      markSavedNow();
       void apiRequest(`/api/admin/packages/${encodeURIComponent(pkg.id)}`, {
         method: 'PUT',
-        requireToken: true,
         body: JSON.stringify(pkg),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Update package failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const updateBrandSettings = useCallback(
     (brandPatch: Partial<BrandSettings>) => {
-      if (!isAdmin) return;
       const merged = {...state.brand, ...brandPatch};
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         brand: merged,
       }));
+      markSavedNow();
       void apiRequest('/api/admin/brand', {
         method: 'PUT',
-        requireToken: true,
         body: JSON.stringify(merged),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Update brand failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow, state.brand],
+    [apiRequest, markSavedNow, state.brand, updateLocalState],
   );
 
   const updateCorporateInquiryStatus = useCallback(
     (id: string, status: CorporateInquiry['status']) => {
-      if (!isAdmin) return;
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         corporateInquiries: prev.corporateInquiries.map((inq) =>
           inq.id === id ? {...inq, status} : inq,
         ),
       }));
+      markSavedNow();
       void apiRequest(`/api/admin/corporate-inquiries/${encodeURIComponent(id)}`, {
         method: 'PATCH',
-        requireToken: true,
         body: JSON.stringify({status}),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Update inquiry failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const upsertProduct = useCallback(
     (product: KhulProduct) => {
-      if (!isAdmin) return;
-      setState((prev) => {
+      updateLocalState((prev) => {
         const exists = prev.products.some((p) => p.id === product.id);
         return {
           ...prev,
@@ -750,59 +627,50 @@ export function useSanctuaryStore() {
             : [product, ...prev.products],
         };
       });
+      markSavedNow();
       void apiRequest(`/api/admin/products/${encodeURIComponent(product.id)}`, {
         method: 'PUT',
-        requireToken: true,
         body: JSON.stringify(product),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Save product failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const toggleProductStock = useCallback(
     (id: string) => {
-      if (!isAdmin) return;
       const target = state.products.find((p) => p.id === id);
       if (!target) return;
       const next = {...target, inStock: !target.inStock};
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         products: prev.products.map((p) => (p.id === id ? next : p)),
       }));
+      markSavedNow();
       void apiRequest(`/api/admin/products/${encodeURIComponent(id)}`, {
         method: 'PUT',
-        requireToken: true,
         body: JSON.stringify(next),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Toggle product stock failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow, state.products],
+    [apiRequest, markSavedNow, state.products, updateLocalState],
   );
 
   const updateOrderStatus = useCallback(
     (id: string, status: StoreOrder['status']) => {
-      if (!isAdmin) return;
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         orders: prev.orders.map((o) => (o.id === id ? {...o, status} : o)),
       }));
+      markSavedNow();
       void apiRequest(`/api/admin/orders/${encodeURIComponent(id)}`, {
         method: 'PATCH',
-        requireToken: true,
         body: JSON.stringify({status}),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Update order status failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const publishAnnouncement = useCallback(
     (payload: Omit<Announcement, 'id' | 'publishedAt'>) => {
-      if (!isAdmin) return;
       const item: Announcement = {
         ...payload,
         id: `ann-${Date.now()}`,
@@ -812,57 +680,48 @@ export function useSanctuaryStore() {
           year: 'numeric',
         }),
       };
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         announcements: [item, ...prev.announcements],
       }));
+      markSavedNow();
       void apiRequest('/api/admin/announcements', {
         method: 'POST',
-        requireToken: true,
         body: JSON.stringify(item),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Publish announcement failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const deleteAnnouncement = useCallback(
     (id: string) => {
-      if (!isAdmin) return;
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         announcements: prev.announcements.filter((a) => a.id !== id),
       }));
+      markSavedNow();
       void apiRequest(`/api/admin/announcements/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        requireToken: true,
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Delete announcement failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const updateWeeklyGame = useCallback(
     (weeklyGame: WeeklyGameConfig) => {
-      if (!isAdmin) return;
-      setState((prev) => ({...prev, weeklyGame}));
+      updateLocalState((prev) => ({...prev, weeklyGame}));
+      markSavedNow();
       void apiRequest('/api/admin/weekly-game', {
         method: 'PUT',
-        requireToken: true,
         body: JSON.stringify(weeklyGame),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Update weekly game failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const upsertReflectionWord = useCallback(
     (word: ReflectionWord) => {
-      if (!isAdmin) return;
-      setState((prev) => {
+      updateLocalState((prev) => {
         const exists = prev.reflectionWords.some((w) => w.id === word.id);
         return {
           ...prev,
@@ -871,130 +730,77 @@ export function useSanctuaryStore() {
             : [word, ...prev.reflectionWords],
         };
       });
+      markSavedNow();
       void apiRequest(`/api/admin/virtue-gifts/${encodeURIComponent(word.id)}`, {
         method: 'PUT',
-        requireToken: true,
         body: JSON.stringify(word),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Save virtue gift failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const deleteReflectionWord = useCallback(
     (id: string) => {
-      if (!isAdmin) return;
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         reflectionWords: prev.reflectionWords.filter((w) => w.id !== id),
       }));
+      markSavedNow();
       void apiRequest(`/api/admin/virtue-gifts/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        requireToken: true,
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Delete virtue gift failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const updateRegistrationStatus = useCallback(
     (id: string, attendanceStatus: SessionRegistration['attendanceStatus']) => {
-      if (!isAdmin) return;
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         registrations: prev.registrations.map((r) =>
           r.id === id ? {...r, attendanceStatus} : r,
         ),
       }));
+      markSavedNow();
       void apiRequest(`/api/admin/registrations/${encodeURIComponent(id)}`, {
         method: 'PATCH',
-        requireToken: true,
         body: JSON.stringify({attendanceStatus}),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Update registration failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const awardMemberBadge = useCallback(
     (memberId: string, badge: string) => {
-      if (!isAdmin) return;
       const cleanBadge = badge.trim();
-      setState((prev) => ({
+      updateLocalState((prev) => ({
         ...prev,
         members: prev.members.map((m) =>
           m.id === memberId ? {...m, awardedBadge: cleanBadge || undefined} : m,
         ),
       }));
+      markSavedNow();
       void apiRequest(`/api/admin/leaderboard/${encodeURIComponent(memberId)}/badge`, {
         method: 'PUT',
-        requireToken: true,
         body: JSON.stringify({badge: cleanBadge || null}),
-      })
-        .then(markSavedNow)
-        .catch((err) => console.error('Award badge failed:', err));
+      }).catch(() => {});
     },
-    [apiRequest, isAdmin, markSavedNow],
-  );
-
-  const grantAdminByUid = useCallback(
-    async (uid: string, email: string) => {
-      if (!isAdmin) return;
-      const cleanUid = uid.trim();
-      const cleanEmail = email.trim();
-      if (!cleanUid || !cleanEmail) return;
-      const res = (await apiRequest('/api/admin/admins', {
-        method: 'POST',
-        requireToken: true,
-        body: JSON.stringify({uid: cleanUid, email: cleanEmail}),
-      })) as {record: AdminRecordItem};
-      setAdminRecords((prev) => [
-        ...prev.filter((r) => r.uid !== res.record.uid),
-        res.record,
-      ]);
-      markSavedNow();
-    },
-    [apiRequest, isAdmin, markSavedNow],
-  );
-
-  const revokeAdminByUid = useCallback(
-    async (uid: string) => {
-      if (!isAdmin) return;
-      await apiRequest(`/api/admin/admins/${encodeURIComponent(uid)}`, {
-        method: 'DELETE',
-        requireToken: true,
-      });
-      setAdminRecords((prev) => prev.filter((r) => r.uid !== uid));
-      markSavedNow();
-    },
-    [apiRequest, isAdmin, markSavedNow],
+    [apiRequest, markSavedNow, updateLocalState],
   );
 
   const resetDemoData = useCallback(() => {
-    setState(INITIAL_SANCTUARY_STATE);
-    if (isAdmin) {
-      void syncCloudDefaults(true);
-    }
-  }, [isAdmin, syncCloudDefaults]);
+    updateLocalState(() => INITIAL_SANCTUARY_STATE);
+    markSavedNow();
+    void apiRequest('/api/admin/reset-defaults', {method: 'POST'})
+      .then(() => fetchPublicState())
+      .catch(() => {});
+  }, [apiRequest, fetchPublicState, markSavedNow, updateLocalState]);
 
   return {
     state,
     currentUser,
-    authUser,
-    authReady,
-    isAdmin,
-    adminCheckDone,
     cloudSynced,
     lastCloudSaveAt,
-    adminRecords,
-    signInWithGoogle,
-    signOutUser,
-    syncCloudDefaults,
-    grantAdminByUid,
-    revokeAdminByUid,
     updateMemberName,
     completeTodayPractice,
     drawVirtueGift,

@@ -5,16 +5,12 @@ import {
   Flame,
   Home,
   LayoutDashboard,
-  Lock,
-  LogIn,
-  LogOut,
   ShieldCheck,
   Sparkles,
   User,
   Wind,
 } from 'lucide-react';
 import {AdminDashboard} from './components/admin/AdminDashboard';
-import {AdminGate} from './components/admin/AdminGate';
 import {KhulLogo} from './components/KhulLogo';
 import {OfflineIndicator} from './components/OfflineIndicator';
 import {EntryModal} from './components/user/EntryModal';
@@ -79,8 +75,7 @@ export default function App() {
     {id: 'registrations', label: 'Registrations', shortLabel: 'Members', icon: User},
   ];
 
-  const showAdminWorkspace = role === 'admin' && store.isAdmin;
-  const showAdminGate = role === 'admin' && !store.isAdmin;
+  const showAdminWorkspace = role === 'admin';
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-[#2C302E]">
@@ -106,109 +101,77 @@ export default function App() {
           </button>
 
           {/* Zone 2: 5 concise single-line text nav links (Desktop) */}
-          {!showAdminGate && (
-            <nav
-              className="hidden md:flex items-center gap-7 text-sm font-medium"
-              aria-label={showAdminWorkspace ? 'Admin Navigation' : 'Member Navigation'}
-            >
-              {showAdminWorkspace
-                ? adminNavItems.map((item) => {
-                    const active = adminTab === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setAdminTab(item.id)}
-                        className={`py-1 whitespace-nowrap shrink-0 border-b-2 transition-colors cursor-pointer ${
-                          active
-                            ? 'border-[#F1931E] text-[#1F3A3D] font-semibold'
-                            : 'border-transparent text-[#5B635E] hover:text-[#1F3A3D]'
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    );
-                  })
-                : userNavItems.map((item) => {
-                    const active = userTab === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => handleNavigateUserTab(item.id)}
-                        className={`py-1 whitespace-nowrap shrink-0 border-b-2 transition-colors cursor-pointer ${
-                          active
-                            ? 'border-[#F1931E] text-[#1F3A3D] font-semibold'
-                            : 'border-transparent text-[#5B635E] hover:text-[#1F3A3D]'
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    );
-                  })}
-            </nav>
-          )}
+          <nav
+            className="hidden md:flex items-center gap-7 text-sm font-medium"
+            aria-label={showAdminWorkspace ? 'Admin Navigation' : 'Member Navigation'}
+          >
+            {showAdminWorkspace
+              ? adminNavItems.map((item) => {
+                  const active = adminTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setAdminTab(item.id)}
+                      className={`py-1 whitespace-nowrap shrink-0 border-b-2 transition-colors cursor-pointer ${
+                        active
+                          ? 'border-[#F1931E] text-[#1F3A3D] font-semibold'
+                          : 'border-transparent text-[#5B635E] hover:text-[#1F3A3D]'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })
+              : userNavItems.map((item) => {
+                  const active = userTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleNavigateUserTab(item.id)}
+                      className={`py-1 whitespace-nowrap shrink-0 border-b-2 transition-colors cursor-pointer ${
+                        active
+                          ? 'border-[#F1931E] text-[#1F3A3D] font-semibold'
+                          : 'border-transparent text-[#5B635E] hover:text-[#1F3A3D]'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+          </nav>
 
-          {/* Zone 3: Privilege-Separated Right Action */}
+          {/* Zone 3: Quick View Switcher / Member Profile */}
           <div className="flex items-center gap-2.5 shrink-0">
             {showAdminWorkspace ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setRole('user')}
-                  className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <Eye className="w-4 h-4 shrink-0" />
-                  <span>View User Page</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void store.signOutUser();
-                    setRole('user');
-                  }}
-                  className="min-h-[40px] px-3 py-2 rounded-xl border border-[#DDD5C7] hover:bg-white text-[#49504C] text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
-                  aria-label="Sign out of Admin"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Sign Out</span>
-                </button>
-              </>
-            ) : showAdminGate ? (
               <button
                 type="button"
                 onClick={() => setRole('user')}
-                className="min-h-[40px] px-3.5 py-2 rounded-xl border border-[#DDD5C7] hover:bg-white text-[#1F3A3D] text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                Member View
-              </button>
-            ) : store.isAdmin ? (
-              <button
-                type="button"
-                onClick={() => setRole('admin')}
-                className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#1F3A3D] hover:bg-[#162B2D] text-[#FAF8F5] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <ShieldCheck className="w-4 h-4 text-[#F1931E] shrink-0" />
-                <span>Admin Portal</span>
-              </button>
-            ) : store.authUser ? (
-              <button
-                type="button"
-                onClick={() => setEntryOpen(true)}
-                className="min-h-[40px] px-3.5 py-2 rounded-xl border border-[#DDD5C7] hover:bg-white text-[#1F3A3D] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <User className="w-3.5 h-3.5 text-[#4A6B5D] shrink-0" />
-                <span>{currentUser.name.split(' ')[0]}</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setEntryOpen(true)}
                 className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <LogIn className="w-3.5 h-3.5 shrink-0" />
-                <span>Member Sign In</span>
+                <Eye className="w-4 h-4 shrink-0" />
+                <span>View User Page</span>
               </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setEntryOpen(true)}
+                  className="min-h-[40px] px-3 py-2 rounded-xl border border-[#DDD5C7] hover:bg-white text-[#1F3A3D] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <User className="w-3.5 h-3.5 text-[#4A6B5D] shrink-0" />
+                  <span>{currentUser.name.split(' ')[0]}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRole('admin')}
+                  className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#1F3A3D] hover:bg-[#162B2D] text-[#FAF8F5] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4 text-[#F1931E] shrink-0" />
+                  <span>Admin Portal</span>
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -217,24 +180,11 @@ export default function App() {
       {/* Main Content Canvas */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8 pb-24 md:pb-12">
         {role === 'admin' ? (
-          store.isAdmin ? (
-            <AdminDashboard
-              activeTab={adminTab}
-              onChangeTab={setAdminTab}
-              store={store}
-            />
-          ) : (
-            <AdminGate
-              brand={state.brand}
-              authUser={store.authUser}
-              authReady={store.authReady}
-              adminCheckDone={store.adminCheckDone}
-              isAdmin={store.isAdmin}
-              onSignIn={store.signInWithGoogle}
-              onSignOut={store.signOutUser}
-              onExitAdmin={() => setRole('user')}
-            />
-          )
+          <AdminDashboard
+            activeTab={adminTab}
+            onChangeTab={setAdminTab}
+            store={store}
+          />
         ) : (
           <>
             {userTab === 'home' && (
@@ -302,7 +252,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Quiet Footer with discreet Admin Portal link */}
+      {/* Quiet Footer with direct Admin Portal switch */}
       <footer className="border-t border-[#E7E1D6] py-6 px-4 sm:px-8 pb-20 md:pb-6 text-xs text-[#6B736E]">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <span>
@@ -318,69 +268,63 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={() => setRole('admin')}
+              onClick={() => setRole(role === 'admin' ? 'user' : 'admin')}
               className="text-[#5B635E] hover:text-[#1F3A3D] inline-flex items-center gap-1 transition-colors cursor-pointer"
             >
-              <Lock className="w-3 h-3" />
-              <span>Admin Portal</span>
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{role === 'admin' ? 'View User Page' : 'Admin Portal'}</span>
             </button>
           </div>
         </div>
       </footer>
 
       {/* Mobile Bottom Navigation Bar (Fixed 5-Tab Thumb Zone, h-16) */}
-      {!showAdminGate && (
-        <nav
-          className="md:hidden fixed bottom-0 left-0 right-0 z-40 h-16 bg-[#FAF8F5]/95 backdrop-blur-md border-t border-[#E7E1D6]"
-          aria-label="Mobile navigation"
-        >
-          <div className="grid grid-cols-5 h-full items-center">
-            {(showAdminWorkspace ? adminNavItems : userNavItems).map((item) => {
-              const Icon = item.icon;
-              const active = showAdminWorkspace
-                ? adminTab === item.id
-                : userTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    if (showAdminWorkspace) {
-                      setAdminTab(item.id as AdminTab);
-                    } else {
-                      handleNavigateUserTab(item.id as UserTab);
-                    }
-                  }}
-                  className={`h-full flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer ${
-                    active ? 'text-[#1F3A3D]' : 'text-[#6B736E]'
+      <nav
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 h-16 bg-[#FAF8F5]/95 backdrop-blur-md border-t border-[#E7E1D6]"
+        aria-label="Mobile navigation"
+      >
+        <div className="grid grid-cols-5 h-full items-center">
+          {(showAdminWorkspace ? adminNavItems : userNavItems).map((item) => {
+            const Icon = item.icon;
+            const active = showAdminWorkspace
+              ? adminTab === item.id
+              : userTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  if (showAdminWorkspace) {
+                    setAdminTab(item.id as AdminTab);
+                  } else {
+                    handleNavigateUserTab(item.id as UserTab);
+                  }
+                }}
+                className={`h-full flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer ${
+                  active ? 'text-[#1F3A3D]' : 'text-[#6B736E]'
+                }`}
+              >
+                <Icon
+                  className={`w-5 h-5 ${active ? 'text-[#F1931E]' : 'text-[#6B736E]'}`}
+                />
+                <span
+                  className={`text-[10px] tracking-tight whitespace-nowrap ${
+                    active ? 'font-semibold text-[#1F3A3D]' : 'font-medium'
                   }`}
                 >
-                  <Icon
-                    className={`w-5 h-5 ${active ? 'text-[#F1931E]' : 'text-[#6B736E]'}`}
-                  />
-                  <span
-                    className={`text-[10px] tracking-tight whitespace-nowrap ${
-                      active ? 'font-semibold text-[#1F3A3D]' : 'font-medium'
-                    }`}
-                  >
-                    {item.shortLabel}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </nav>
-      )}
+                  {item.shortLabel}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
       <EntryModal
         open={entryOpen}
         brand={state.brand}
         member={currentUser}
-        authUser={store.authUser}
-        isAdmin={store.isAdmin}
         onUpdateProfile={store.updateMemberName}
-        onSignIn={store.signInWithGoogle}
-        onSignOut={store.signOutUser}
         onSelectRole={setRole}
         onClose={() => setEntryOpen(false)}
       />
