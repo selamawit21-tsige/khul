@@ -33,7 +33,7 @@ export const QRMatrixSVG: React.FC<{code: string; className?: string}> = ({
       className={className}
       shapeRendering="crispEdges"
       role="img"
-      aria-label={`Scannable digital pass QR code ${code}`}
+      aria-label="Scannable digital pass QR code"
     >
       <rect width={totalSize} height={totalSize} fill="#FFFFFF" rx="1" />
       {matrix.map((row, r) =>
@@ -54,6 +54,19 @@ export const QRMatrixSVG: React.FC<{code: string; className?: string}> = ({
   );
 };
 
+export function encodeKhulPassPayload(reg: SessionRegistration): string {
+  const safe = (val: string | undefined) => (val ?? '').replace(/\|/g, ' ').trim();
+  return [
+    `KHUL:V1:${safe(reg.passCode)}`,
+    safe(reg.memberName),
+    safe(reg.packageTier),
+    String(reg.amountEtb ?? 0),
+    safe(reg.sessionTitle),
+    safe(reg.sessionDate),
+    safe(reg.sessionId),
+  ].join('|');
+}
+
 interface QRPassModalProps {
   registration: SessionRegistration | null;
   venueName: string;
@@ -68,10 +81,11 @@ export const QRPassModal: React.FC<QRPassModalProps> = ({
   if (!registration) return null;
 
   const isCheckedIn = registration.attendanceStatus === 'Checked In';
+  const qrPayload = encodeKhulPassPayload(registration);
 
   const handleDownloadPass = async () => {
     try {
-      const dataUrl = await QRCode.toDataURL(registration.passCode, {
+      const dataUrl = await QRCode.toDataURL(qrPayload, {
         width: 512,
         margin: 4,
         color: {dark: '#000000', light: '#FFFFFF'},
@@ -117,7 +131,7 @@ export const QRPassModal: React.FC<QRPassModalProps> = ({
 
         <div className="p-6 flex flex-col items-center text-center">
           <div className="p-4 rounded-2xl bg-white border border-[#E5DFD3]">
-            <QRMatrixSVG code={registration.passCode} className="w-48 h-48" />
+            <QRMatrixSVG code={qrPayload} className="w-48 h-48" />
           </div>
           <p className="mt-3 font-mono text-sm font-semibold tracking-wider text-[#1F3A3D] tabular-nums">
             {registration.passCode}

@@ -852,16 +852,51 @@ export function useSanctuaryStore() {
       scannedCode: string;
       registration?: SessionRegistration;
     }> => {
+      interface EmbeddedQrPass {
+        k?: number;
+        c?: string;
+        passCode?: string;
+        n?: string;
+        e?: string;
+        m?: string;
+        s?: string;
+        t?: string;
+        d?: string;
+        p?: PackageTier;
+        a?: number;
+      }
+
       let cleanCode = rawCode.trim();
-      if (cleanCode.startsWith('{')) {
+      let embeddedPass: EmbeddedQrPass | null = null;
+
+      if (cleanCode.toUpperCase().startsWith('KHUL:V1:')) {
+        const parts = cleanCode.slice(8).split('|');
+        const codePart = parts[0]?.trim() ?? '';
+        if (codePart) {
+          cleanCode = codePart;
+          embeddedPass = {
+            k: 1,
+            c: codePart,
+            n: parts[1]?.trim(),
+            p: parts[2]?.trim() as PackageTier | undefined,
+            a: parts[3] ? Number(parts[3]) : undefined,
+            t: parts[4]?.trim(),
+            d: parts[5]?.trim(),
+            s: parts[6]?.trim(),
+          };
+        }
+      } else if (cleanCode.startsWith('{')) {
         try {
-          const parsed = JSON.parse(cleanCode) as {passCode?: string};
-          if (parsed.passCode) cleanCode = parsed.passCode.trim();
+          const parsed = JSON.parse(cleanCode) as EmbeddedQrPass;
+          embeddedPass = parsed;
+          const extracted = parsed.c ?? parsed.passCode;
+          if (typeof extracted === 'string' && extracted.trim()) {
+            cleanCode = extracted.trim();
+          }
         } catch {
           // keep raw string
         }
-      }
-      if (cleanCode.toUpperCase().startsWith('KHUL:PASS:')) {
+      } else if (cleanCode.toUpperCase().startsWith('KHUL:PASS:')) {
         cleanCode = cleanCode.slice(10).trim();
       }
       if (!cleanCode) {
@@ -929,12 +964,55 @@ export function useSanctuaryStore() {
           };
         }
       } catch {
-        // Not found in DB or offline
+        // Not found in DB or running on static host without DB
+      }
+
+      // Fallback for cross-device / static hosting: trust valid embedded pass payload
+      if (embeddedPass && embeddedPass.c && (embeddedPass.n || embeddedPass.t)) {
+        const tier: PackageTier =
+          embeddedPass.p === 'Weekly' || embeddedPass.p === 'Monthly'
+            ? embeddedPass.p
+            : 'Single';
+        const newReg: SessionRegistration = {
+          id: `reg-qr-${embeddedPass.c.toLowerCase().replace(/[^a-z0-9-]/g, '')}`,
+          memberName: embeddedPass.n?.trim() || 'Khul Guest',
+          memberEmail: embeddedPass.e?.trim() || '',
+          memberPhone: embeddedPass.m?.trim() || '',
+          sessionId: embeddedPass.s || state.sessions[0]?.id || 'wed-session',
+          sessionTitle: embeddedPass.t || state.sessions[0]?.title || 'Wednesday Sanctuary Gathering',
+          sessionDate: embeddedPass.d || state.sessions[0]?.date || 'Upcoming Wednesday',
+          packageTier: tier,
+          amountEtb: typeof embeddedPass.a === 'number' ? embeddedPass.a : 650,
+          passCode: embeddedPass.c.trim().toUpperCase(),
+          attendanceStatus: 'Checked In',
+          createdAt: new Date().toISOString(),
+        };
+
+        updateLocalState((prev) => ({
+          ...prev,
+          registrations: [newReg, ...prev.registrations],
+          sessions: prev.sessions.map((s) =>
+            s.id === newReg.sessionId
+              ? {...s, registeredCount: Math.min(s.capacity, s.registeredCount + 1)}
+              : s,
+          ),
+        }));
+        markSavedNow();
+        void apiRequest('/api/registrations', {
+          method: 'POST',
+          body: JSON.stringify(newReg),
+        }).catch(() => {});
+
+        return {
+          status: 'checked-in',
+          scannedCode: newReg.passCode,
+          registration: newReg,
+        };
       }
 
       return {status: 'not-found', scannedCode: cleanCode};
     },
-    [apiRequest, markSavedNow, state.registrations, updateLocalState],
+    [apiRequest, markSavedNow, state.registrations, state.sessions, updateLocalState],
   );
 
   const awardMemberBadge = useCallback(

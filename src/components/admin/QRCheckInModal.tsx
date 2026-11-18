@@ -36,6 +36,24 @@ declare global {
   }
 }
 
+function isKhulPayload(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  if (trimmed.toUpperCase().startsWith('KHUL:V1:')) return true;
+  if (trimmed.toUpperCase().startsWith('KHUL:PASS:')) return true;
+  if (/^KHUL-[A-Z0-9-]+$/i.test(trimmed)) return true;
+  if (/^REG-[A-Z0-9-]+$/i.test(trimmed)) return true;
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as {k?: number; c?: string; passCode?: string};
+      return parsed.k === 1 || typeof parsed.c === 'string' || typeof parsed.passCode === 'string';
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
   open,
   registrations,
@@ -61,6 +79,7 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
   const [manualCode, setManualCode] = useState('');
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<QRCheckInResult | null>(null);
+  const [scanHint, setScanHint] = useState<string | null>(null);
   const [recentCheckIns, setRecentCheckIns] = useState<SessionRegistration[]>([]);
 
   const checkedInCount = registrations.filter(
@@ -99,6 +118,14 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
     const trimmed = rawCode.trim();
     if (!trimmed || processingRef.current) return;
 
+    // Ignore non-Khul / outdated decorative QR noise during live camera scanning without locking the scanner
+    if (!force && !isKhulPayload(trimmed)) {
+      setScanHint(
+        'Outdated or non-Khul QR detected — ask the guest to refresh their ticket page to generate the latest scannable pass, or enter the KHUL code below.',
+      );
+      return;
+    }
+
     const now = Date.now();
     if (
       !force &&
@@ -109,6 +136,7 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
     }
     lastScannedRef.current = {code: trimmed, at: now};
 
+    setScanHint(null);
     processingRef.current = true;
     setProcessing(true);
     try {
@@ -252,6 +280,7 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
   useEffect(() => {
     if (open) {
       setResult(null);
+      setScanHint(null);
       lastScannedRef.current = {code: '', at: 0};
       void startCamera(facingMode);
     } else {
@@ -435,6 +464,14 @@ export const QRCheckInModal: React.FC<QRCheckInModalProps> = ({
               className="hidden"
             />
           </div>
+
+          {/* Non-blocking Scan Hint for outdated/non-Khul QR codes */}
+          {scanHint && !result && (
+            <div className="rounded-xl p-3.5 border border-[#F1931E]/45 bg-[#FFF5E8] text-[#1F3A3D] flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-[#C86D0A] shrink-0 mt-0.5" />
+              <p className="text-xs leading-relaxed">{scanHint}</p>
+            </div>
+          )}
 
           {/* Scan Result Banner */}
           {result && (
