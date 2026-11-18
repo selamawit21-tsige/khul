@@ -69,10 +69,10 @@ export const INITIAL_SANCTUARY_STATE: SanctuaryState = {
     {
       id: 'wed-4',
       weekLabel: 'Week 4 · Every Wednesday',
-      title: 'ልቦና እና ውስጣዊ እድሳት | Lebona & Inner Recharge',
-      theme: 'Kinet Hiwot · Heartfulness & New Strength',
+      title: 'የልቦና ልህቀት ልምምድ | Lebona Heartfulness',
+      theme: 'Emotional Awareness · Renewal · We Are Jamming',
       description:
-        'An immersive heart-centered gathering to release accumulated tension, awaken fresh inner strength, and anchor conscious living.',
+        'Bring your energy, voice, rhythm, and heart for emotional awareness, renewal, inner peace, sharper focus, and joyful community jamming with Yoftahe.',
       date: 'Wed, Dec 9, 2026',
       time: '5:45 PM EAT (11:45 Local)',
       facilitator: 'Yoftahe',
@@ -82,7 +82,7 @@ export const INITIAL_SANCTUARY_STATE: SanctuaryState = {
       registeredCount: 22,
       priceEtb: 650,
       published: true,
-      posterUrl: '/assets/aistudio/lebona_bf434e08.jpg',
+      posterUrl: '/assets/aistudio/lebona_962b0ece.jpg',
     },
   ],
   packages: [

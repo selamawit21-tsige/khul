@@ -1,4 +1,4 @@
-import {asc, desc, eq} from 'drizzle-orm';
+import {asc, desc, eq, ilike} from 'drizzle-orm';
 import {INITIAL_SANCTUARY_STATE} from '../data/initialData.ts';
 import type {
   Announcement,
@@ -873,6 +873,61 @@ export async function updateRegistrationStatusInDb(
   } catch (error) {
     console.error('Database error in updateRegistrationStatusInDb:', error);
     throw new Error('Failed to update attendance status.', {cause: error});
+  }
+}
+
+export async function checkInRegistrationByPassCodeInDb(passCode: string): Promise<{
+  found: boolean;
+  alreadyCheckedIn: boolean;
+  registration?: SessionRegistration;
+}> {
+  try {
+    const cleanCode = passCode.trim();
+    if (!cleanCode) {
+      return {found: false, alreadyCheckedIn: false};
+    }
+
+    const rows = await db
+      .select()
+      .from(sessionRegistrations)
+      .where(ilike(sessionRegistrations.passCode, cleanCode))
+      .limit(1);
+
+    if (rows.length === 0) {
+      return {found: false, alreadyCheckedIn: false};
+    }
+
+    const row = rows[0];
+    const alreadyCheckedIn = row.attendanceStatus === 'Checked In';
+
+    if (!alreadyCheckedIn) {
+      await db
+        .update(sessionRegistrations)
+        .set({attendanceStatus: 'Checked In', updatedAt: new Date()})
+        .where(eq(sessionRegistrations.id, row.id));
+    }
+
+    return {
+      found: true,
+      alreadyCheckedIn,
+      registration: {
+        id: row.id,
+        memberName: row.memberName,
+        memberEmail: row.memberEmail,
+        memberPhone: row.memberPhone,
+        sessionId: row.sessionId,
+        sessionTitle: row.sessionTitle,
+        sessionDate: row.sessionDate,
+        packageTier: row.packageTier as PackageTier,
+        amountEtb: row.amountEtb,
+        passCode: row.passCode,
+        attendanceStatus: 'Checked In',
+        createdAt: row.createdAt,
+      },
+    };
+  } catch (error) {
+    console.error('Database error in checkInRegistrationByPassCodeInDb:', error);
+    throw new Error('Failed to check in registration by QR pass code.', {cause: error});
   }
 }
 

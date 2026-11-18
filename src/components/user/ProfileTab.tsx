@@ -27,7 +27,8 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
   collectedWords,
   onOpenEntryScreen,
 }) => {
-  const [activePass, setActivePass] = useState<SessionRegistration | null>(null);
+  const [activePassId, setActivePassId] = useState<string | null>(null);
+  const activePass = registrations.find((r) => r.id === activePassId) ?? null;
 
   const memberRegistrations = registrations.filter(
     (r) =>
@@ -130,7 +131,7 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => setActivePass(reg)}
+                    onClick={() => setActivePassId(reg.id)}
                     className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 self-start sm:self-center cursor-pointer"
                   >
                     <QrCode className="w-4 h-4" />
@@ -229,7 +230,7 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
       <QRPassModal
         registration={activePass}
         venueName={brand.venueName}
-        onClose={() => setActivePass(null)}
+        onClose={() => setActivePassId(null)}
       />
     </div>
   );

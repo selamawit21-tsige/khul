@@ -1,9 +1,11 @@
 import 'dotenv/config';
 import express, {type Response} from 'express';
+import http from 'http';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import {
   awardMemberBadgeInDb,
+  checkInRegistrationByPassCodeInDb,
   createInquiryInDb,
   createOrderInDb,
   createRegistrationInDb,
@@ -241,6 +243,28 @@ app.delete('/api/admin/virtue-gifts/:id', async (req, res) => {
   }
 });
 
+app.post('/api/admin/registrations/check-in', async (req, res) => {
+  try {
+    const passCode = typeof req.body?.passCode === 'string' ? req.body.passCode : '';
+    const result = await checkInRegistrationByPassCodeInDb(passCode);
+    if (!result.found) {
+      res.status(404).json({ok: false, error: 'Pass code not found.'});
+      return;
+    }
+    if (!result.alreadyCheckedIn) {
+      broadcastStateUpdate('registrations');
+    }
+    res.json({
+      ok: true,
+      alreadyCheckedIn: result.alreadyCheckedIn,
+      registration: result.registration,
+    });
+  } catch (error) {
+    console.error('POST /api/admin/registrations/check-in failed:', error);
+    res.status(500).json({error: 'Unable to check in attendee.'});
+  }
+});
+
 app.patch('/api/admin/registrations/:id', async (req, res) => {
   try {
     await updateRegistrationStatusInDb(req.params.id, req.body.attendanceStatus);
@@ -297,10 +321,18 @@ app.post('/api/admin/reset-defaults', async (_req, res) => {
 });
 
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== 'production') {
     const {createServer: createViteServer} = await import('vite');
     const vite = await createViteServer({
-      server: {middlewareMode: true},
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        ws: {server: httpServer},
+        forwardConsole: false,
+        watch: null,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -312,7 +344,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Khul World server running on http://0.0.0.0:${PORT}`);
   });
 }

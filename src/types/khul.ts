@@ -185,5 +185,7 @@ export interface SanctuaryState {
   members: CommunityMember[];
   currentUserId: string;
   checkedInToday: boolean;
+  lastPracticeDate?: string;
+  streakStartDate?: string;
   stillnessIntention: string;
 }

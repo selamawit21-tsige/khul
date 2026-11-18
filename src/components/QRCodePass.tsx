@@ -1,50 +1,20 @@
-import React from 'react';
-import {CheckCircle2, MapPin, X} from 'lucide-react';
+import React, {useMemo} from 'react';
+import QRCode from 'qrcode';
+import {CheckCircle2, Download, MapPin, X} from 'lucide-react';
 import {SessionRegistration} from '../types/khul';
 
-// Generates a crisp deterministic 21x21 QR-style matrix SVG from a passCode string
-function buildQrMatrix(seedStr: string): boolean[][] {
-  const size = 21;
-  const grid: boolean[][] = Array.from({length: size}, () => Array(size).fill(false));
-
-  const placeFinder = (r0: number, c0: number) => {
-    for (let r = 0; r < 7; r++) {
-      for (let c = 0; c < 7; c++) {
-        const isBorder = r === 0 || r === 6 || c === 0 || c === 6;
-        const isCenter = r >= 2 && r <= 4 && c >= 2 && c <= 4;
-        grid[r0 + r][c0 + c] = isBorder || isCenter;
-      }
-    }
-  };
-
-  placeFinder(0, 0);
-  placeFinder(0, size - 7);
-  placeFinder(size - 7, 0);
-
-  let hash = 2166136261;
-  for (let i = 0; i < seedStr.length; i++) {
-    hash ^= seedStr.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-
+// Generates a genuine ISO/IEC 18004 scannable QR code matrix using `qrcode`
+function buildScannableQrMatrix(payload: string): boolean[][] {
+  const qr = QRCode.create(payload || 'KHUL', {errorCorrectionLevel: 'M'});
+  const size = qr.modules.size;
+  const grid: boolean[][] = [];
   for (let r = 0; r < size; r++) {
+    const row: boolean[] = [];
     for (let c = 0; c < size; c++) {
-      const inTopLeft = r < 8 && c < 8;
-      const inTopRight = r < 8 && c >= size - 8;
-      const inBottomLeft = r >= size - 8 && c < 8;
-      if (inTopLeft || inTopRight || inBottomLeft) continue;
-
-      if (r === 6 || c === 6) {
-        grid[r][c] = (r + c) % 2 === 0;
-        continue;
-      }
-
-      hash ^= (r * 31 + c * 17) & 0xff;
-      hash = Math.imul(hash, 16777619);
-      grid[r][c] = (Math.abs(hash) % 10) > 4;
+      row.push(Boolean(qr.modules.get(r, c)));
     }
+    grid.push(row);
   }
-
   return grid;
 }
 
@@ -52,24 +22,27 @@ export const QRMatrixSVG: React.FC<{code: string; className?: string}> = ({
   code,
   className = 'w-40 h-40',
 }) => {
-  const matrix = buildQrMatrix(code);
+  const matrix = useMemo(() => buildScannableQrMatrix(code), [code]);
   const size = matrix.length;
+  const quietZone = 2;
+  const totalSize = size + quietZone * 2;
 
   return (
     <svg
-      viewBox={`0 0 ${size} ${size}`}
+      viewBox={`0 0 ${totalSize} ${totalSize}`}
       className={className}
+      shapeRendering="crispEdges"
       role="img"
-      aria-label={`Digital pass QR code ${code}`}
+      aria-label={`Scannable digital pass QR code ${code}`}
     >
-      <rect width={size} height={size} fill="#FFFFFF" rx="1" />
+      <rect width={totalSize} height={totalSize} fill="#FFFFFF" rx="1" />
       {matrix.map((row, r) =>
         row.map((filled, c) =>
           filled ? (
             <rect
               key={`${r}-${c}`}
-              x={c}
-              y={r}
+              x={c + quietZone}
+              y={r + quietZone}
               width={1}
               height={1}
               fill="#1F3A3D"
@@ -94,6 +67,26 @@ export const QRPassModal: React.FC<QRPassModalProps> = ({
 }) => {
   if (!registration) return null;
 
+  const isCheckedIn = registration.attendanceStatus === 'Checked In';
+
+  const handleDownloadPass = async () => {
+    try {
+      const dataUrl = await QRCode.toDataURL(registration.passCode, {
+        width: 512,
+        margin: 3,
+        color: {dark: '#1F3A3D', light: '#FFFFFF'},
+      });
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `khul-pass-${registration.passCode}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      // Ignore download failure on restricted browsers
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
@@ -106,7 +99,7 @@ export const QRPassModal: React.FC<QRPassModalProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs font-medium text-[#F1931E]">
               <CheckCircle2 className="w-4 h-4" />
-              <span>Confirmed Session Pass</span>
+              <span>{isCheckedIn ? 'Checked In at Door' : 'Confirmed Session Pass'}</span>
             </div>
             <h3 id="qr-pass-title" className="mt-1 text-xl font-semibold text-white">
               {registration.packageTier} Pass
@@ -124,13 +117,16 @@ export const QRPassModal: React.FC<QRPassModalProps> = ({
 
         <div className="p-6 flex flex-col items-center text-center">
           <div className="p-4 rounded-2xl bg-white border border-[#E5DFD3]">
-            <QRMatrixSVG code={registration.passCode} className="w-44 h-44" />
+            <QRMatrixSVG code={registration.passCode} className="w-48 h-48" />
           </div>
           <p className="mt-3 font-mono text-sm font-semibold tracking-wider text-[#1F3A3D] tabular-nums">
             {registration.passCode}
           </p>
+          <p className="mt-1 text-[11px] text-[#5B635E]">
+            Show this QR ticket at the entrance for instant attendance check-in.
+          </p>
 
-          <div className="mt-5 w-full rounded-xl bg-white border border-[#E5DFD3] p-4 text-left space-y-2">
+          <div className="mt-4 w-full rounded-xl bg-white border border-[#E5DFD3] p-4 text-left space-y-2">
             <div className="flex justify-between text-xs text-[#5B635E]">
               <span>Member</span>
               <span className="font-semibold text-[#2C302E]">{registration.memberName}</span>
@@ -148,6 +144,16 @@ export const QRPassModal: React.FC<QRPassModalProps> = ({
               </span>
             </div>
             <div className="flex justify-between text-xs text-[#5B635E]">
+              <span>Attendance</span>
+              <span
+                className={`font-semibold ${
+                  isCheckedIn ? 'text-[#4A6B5D]' : 'text-[#C86D0A]'
+                }`}
+              >
+                {registration.attendanceStatus}
+              </span>
+            </div>
+            <div className="flex justify-between text-xs text-[#5B635E]">
               <span>Contribution</span>
               <span className="font-mono tabular-nums font-semibold text-[#1F3A3D]">
                 {registration.amountEtb.toLocaleString()} ETB
@@ -160,13 +166,23 @@ export const QRPassModal: React.FC<QRPassModalProps> = ({
             <span>{venueName} · Doors open 5:30 PM</span>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="mt-5 w-full min-h-[44px] rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-sm font-semibold transition-colors cursor-pointer"
-          >
-            Done
-          </button>
+          <div className="mt-5 w-full flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleDownloadPass}
+              className="min-h-[44px] px-4 rounded-xl border border-[#DDD5C7] bg-white hover:bg-[#F4F0E8] text-[#1F3A3D] text-xs font-semibold inline-flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>Save QR</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 min-h-[44px] rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-sm font-semibold transition-colors cursor-pointer"
+            >
+              Done
+            </button>
+          </div>
         </div>
       </div>
     </div>

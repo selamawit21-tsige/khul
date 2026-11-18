@@ -4,12 +4,14 @@ import {
   Building2,
   Calendar,
   Check,
+  CheckCircle2,
   Cloud,
   Edit3,
   Flame,
   Megaphone,
   Plus,
   RotateCcw,
+  ScanLine,
   Search,
   ShoppingBag,
   Sparkles,
@@ -19,6 +21,7 @@ import {
 import {AdminTab, KhulProduct, ProductCategory, ReflectionWord, VirtueCardTheme, WednesdaySession} from '../../types/khul';
 import {KhulLogo} from '../KhulLogo';
 import {useSanctuaryStore} from '../../hooks/useSanctuaryStore';
+import {QRCheckInModal} from './QRCheckInModal';
 
 interface AdminDashboardProps {
   activeTab: AdminTab;
@@ -77,6 +80,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [gameSaved, setGameSaved] = useState(false);
   const [sessionSavedMsg, setSessionSavedMsg] = useState(false);
 
+  // Price drafts & save indicators for Packages and Store Products
+  const [packagePriceDrafts, setPackagePriceDrafts] = useState<Record<string, string>>({});
+  const [savedPackageId, setSavedPackageId] = useState<string | null>(null);
+  const [productPriceDrafts, setProductPriceDrafts] = useState<Record<string, string>>({});
+  const [savedProductId, setSavedProductId] = useState<string | null>(null);
+
   useEffect(() => {
     setGameDraft(state.weeklyGame);
   }, [state.weeklyGame]);
@@ -97,6 +106,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Registrations & Leaderboard filters
   const [regSearch, setRegSearch] = useState('');
+  const [attendanceFilter, setAttendanceFilter] = useState<'all' | 'checked-in' | 'awaiting'>('all');
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'streak' | 'total'>('streak');
   const [badgeDrafts, setBadgeDrafts] = useState<Record<string, string>>({});
 
@@ -199,14 +210,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const filteredRegistrations = useMemo(() => {
     const q = regSearch.trim().toLowerCase();
-    if (!q) return state.registrations;
-    return state.registrations.filter(
-      (r) =>
+    return state.registrations.filter((r) => {
+      if (attendanceFilter === 'checked-in' && r.attendanceStatus !== 'Checked In') {
+        return false;
+      }
+      if (attendanceFilter === 'awaiting' && r.attendanceStatus === 'Checked In') {
+        return false;
+      }
+      if (!q) return true;
+      return (
         r.memberName.toLowerCase().includes(q) ||
         r.sessionTitle.toLowerCase().includes(q) ||
-        r.passCode.toLowerCase().includes(q),
-    );
-  }, [state.registrations, regSearch]);
+        r.passCode.toLowerCase().includes(q)
+      );
+    });
+  }, [state.registrations, regSearch, attendanceFilter]);
+
+  const checkedInCount = useMemo(
+    () => state.registrations.filter((r) => r.attendanceStatus === 'Checked In').length,
+    [state.registrations],
+  );
 
   const sortedLeaderboard = useMemo(
     () =>
@@ -260,6 +283,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           })}
         </nav>
 
+        <button
+          type="button"
+          onClick={() => {
+            onChangeTab('registrations');
+            setScannerOpen(true);
+          }}
+          className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#1F3A3D] hover:bg-[#162B2D] text-[#FAF8F5] text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+        >
+          <ScanLine className="w-4 h-4 text-[#F1931E] shrink-0" />
+          <span>Scan QR Ticket</span>
+        </button>
+
         <div className="pt-4 border-t border-[#F0EBE1] px-2 space-y-2">
           <div className="rounded-xl bg-[#FAF8F5] border border-[#E7E1D6] p-2.5 space-y-1">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-[#4A6B5D]">
@@ -292,7 +327,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
           <button
             type="button"
-            onClick={store.resetDemoData}
+            onClick={() => {
+              setPackagePriceDrafts({});
+              setProductPriceDrafts({});
+              store.resetDemoData();
+            }}
             className="mt-2 w-full min-h-[38px] px-3 py-1.5 rounded-xl border border-[#E2DACB] hover:bg-[#FAF8F5] text-xs font-medium text-[#5B635E] inline-flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -427,7 +466,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       min="0"
                       value={sessionForm.priceEtb}
                       onChange={(e) =>
-                        setSessionForm({...sessionForm, priceEtb: Number(e.target.value) || 650})
+                        setSessionForm({
+                          ...sessionForm,
+                          priceEtb: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)),
+                        })
                       }
                       className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-[#DDD5C7] bg-[#FAF8F5] text-sm font-mono tabular-nums"
                     />
@@ -562,33 +604,100 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Package Pricing Editor */}
             <section className="rounded-2xl bg-white border border-[#E7E1D6] p-6 space-y-4">
-              <h2 className="text-lg font-semibold text-[#1F3A3D]">
-                Weekly &amp; Monthly Package Pricing (ETB)
-              </h2>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#1F3A3D]">
+                    Weekly &amp; Monthly Package Pricing (ETB)
+                  </h2>
+                  <p className="text-xs text-[#5B635E]">
+                    Enter a new ETB price and click Save to update the User Services page.
+                  </p>
+                </div>
+                {savedPackageId === 'all' && (
+                  <span className="text-xs font-medium text-[#4A6B5D] inline-flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" /> Saved &amp; live on User Page
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {state.packages.map((pkg) => (
-                  <div
-                    key={pkg.id}
-                    className="rounded-xl bg-[#FAF8F5] border border-[#E7E1D6] p-4 space-y-2.5"
-                  >
-                    <p className="text-xs font-medium text-[#4A6B5D]">{pkg.tier} Pass</p>
-                    <p className="text-sm font-semibold text-[#1F3A3D]">{pkg.name}</p>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        value={pkg.priceEtb}
-                        onChange={(e) =>
-                          store.updatePackagePricing({
-                            ...pkg,
-                            priceEtb: Number(e.target.value) || 0,
-                          })
-                        }
-                        className="w-full min-h-[40px] px-3 py-1.5 rounded-lg border border-[#DDD5C7] bg-white font-mono text-sm tabular-nums"
-                      />
-                      <span className="text-xs font-medium text-[#5B635E]">ETB</span>
+                {state.packages.map((pkg) => {
+                  const draftValue = packagePriceDrafts[pkg.id] ?? String(pkg.priceEtb);
+                  const isSaved = savedPackageId === pkg.id;
+                  return (
+                    <div
+                      key={pkg.id}
+                      className="rounded-xl bg-[#FAF8F5] border border-[#E7E1D6] p-4 space-y-3"
+                    >
+                      <div>
+                        <p className="text-xs font-medium text-[#4A6B5D]">{pkg.tier} Pass</p>
+                        <p className="text-sm font-semibold text-[#1F3A3D]">{pkg.name}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0"
+                          value={draftValue}
+                          onChange={(e) =>
+                            setPackagePriceDrafts({
+                              ...packagePriceDrafts,
+                              [pkg.id]: e.target.value,
+                            })
+                          }
+                          aria-label={`${pkg.name} price in ETB`}
+                          className="w-full min-h-[40px] px-3 py-1.5 rounded-lg border border-[#DDD5C7] bg-white font-mono text-sm tabular-nums"
+                        />
+                        <span className="text-xs font-medium text-[#5B635E] shrink-0">ETB</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const parsed = Math.max(0, Number(draftValue) || 0);
+                          store.updatePackagePricing({...pkg, priceEtb: parsed});
+                          setPackagePriceDrafts((prev) => {
+                            const next = {...prev};
+                            delete next[pkg.id];
+                            return next;
+                          });
+                          setSavedPackageId(pkg.id);
+                          window.setTimeout(() => setSavedPackageId(null), 2500);
+                        }}
+                        className="w-full min-h-[38px] px-3 py-1.5 rounded-lg bg-[#1F3A3D] hover:bg-[#162B2D] text-[#FAF8F5] text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        {isSaved ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-[#F1931E]" />
+                            <span>Saved on User Page</span>
+                          </>
+                        ) : (
+                          <span>Save Price</span>
+                        )}
+                      </button>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
+              </div>
+              <div className="pt-1 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    for (const pkg of state.packages) {
+                      const raw = packagePriceDrafts[pkg.id];
+                      if (raw !== undefined) {
+                        store.updatePackagePricing({
+                          ...pkg,
+                          priceEtb: Math.max(0, Number(raw) || 0),
+                        });
+                      }
+                    }
+                    setPackagePriceDrafts({});
+                    setSavedPackageId('all');
+                    window.setTimeout(() => setSavedPackageId(null), 2500);
+                  }}
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save All Package Prices</span>
+                </button>
               </div>
             </section>
           </div>
@@ -749,65 +858,131 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Inventory Table */}
             <section className="rounded-2xl bg-white border border-[#E7E1D6] p-6 space-y-4">
-              <h2 className="text-lg font-semibold text-[#1F3A3D]">Catalog &amp; Stock Control</h2>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#1F3A3D]">Catalog &amp; Stock Control</h2>
+                  <p className="text-xs text-[#5B635E]">
+                    Update any product price and click Save to publish it to the Khul Life Store.
+                  </p>
+                </div>
+                {savedProductId === 'all' && (
+                  <span className="text-xs font-medium text-[#4A6B5D] inline-flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" /> Store prices saved &amp; live
+                  </span>
+                )}
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-[#EFEAE0] text-xs text-[#5B635E]">
                       <th className="py-2.5 pr-4 font-medium">Product</th>
                       <th className="py-2.5 pr-4 font-medium">Category</th>
-                      <th className="py-2.5 pr-4 font-medium text-right">Price</th>
+                      <th className="py-2.5 pr-4 font-medium text-right">Price (ETB)</th>
                       <th className="py-2.5 text-right font-medium">Stock Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#F4F0E8] text-sm">
-                    {state.products.map((p) => (
-                      <tr key={p.id}>
-                        <td className="py-3 pr-4">
-                          <div className="flex items-center gap-3">
-                            {p.customImageUrl && (
-                              <img
-                                src={p.customImageUrl}
-                                alt={p.name}
-                                referrerPolicy="no-referrer"
-                                className="w-10 h-10 rounded-lg object-cover border border-[#E7E1D6] shrink-0"
+                    {state.products.map((p) => {
+                      const draftPrice = productPriceDrafts[p.id] ?? String(p.priceEtb);
+                      const isSaved = savedProductId === p.id;
+                      return (
+                        <tr key={p.id}>
+                          <td className="py-3 pr-4">
+                            <div className="flex items-center gap-3">
+                              {p.customImageUrl && (
+                                <img
+                                  src={p.customImageUrl}
+                                  alt={p.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-10 h-10 rounded-lg object-cover border border-[#E7E1D6] shrink-0"
+                                />
+                              )}
+                              <span className="font-medium text-[#1F3A3D]">{p.name}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 pr-4 text-xs text-[#5B635E]">{p.category}</td>
+                          <td className="py-3 pr-4 text-right font-mono tabular-nums">
+                            <div className="inline-flex items-center justify-end gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                value={draftPrice}
+                                onChange={(e) =>
+                                  setProductPriceDrafts({
+                                    ...productPriceDrafts,
+                                    [p.id]: e.target.value,
+                                  })
+                                }
+                                aria-label={`Price for ${p.name}`}
+                                className="w-24 text-right px-2.5 py-1.5 rounded-lg border border-[#E2DACB] bg-[#FAF8F5] text-xs font-mono tabular-nums"
                               />
-                            )}
-                            <span className="font-medium text-[#1F3A3D]">{p.name}</span>
-                          </div>
-                        </td>
-                        <td className="py-3 pr-4 text-xs text-[#5B635E]">{p.category}</td>
-                        <td className="py-3 pr-4 text-right font-mono tabular-nums">
-                          <input
-                            type="number"
-                            value={p.priceEtb}
-                            onChange={(e) =>
-                              store.upsertProduct({
-                                ...p,
-                                priceEtb: Number(e.target.value) || 0,
-                              })
-                            }
-                            aria-label={`Price for ${p.name}`}
-                            className="w-24 text-right px-2 py-1 rounded-lg border border-[#E2DACB] bg-[#FAF8F5] text-xs font-mono tabular-nums"
-                          />
-                        </td>
-                        <td className="py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => store.toggleProductStock(p.id)}
-                            className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
-                              p.inStock
-                                ? 'bg-[#EEF4F0] text-[#4A6B5D]'
-                                : 'bg-[#FBEAE8] text-[#A23B2A]'
-                            }`}
-                          >
-                            {p.inStock ? 'In Stock' : 'Out of Stock'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const parsed = Math.max(0, Number(draftPrice) || 0);
+                                  store.upsertProduct({...p, priceEtb: parsed});
+                                  setProductPriceDrafts((prev) => {
+                                    const next = {...prev};
+                                    delete next[p.id];
+                                    return next;
+                                  });
+                                  setSavedProductId(p.id);
+                                  window.setTimeout(() => setSavedProductId(null), 2200);
+                                }}
+                                className="min-h-[34px] px-3 py-1 rounded-lg bg-[#1F3A3D] hover:bg-[#162B2D] text-[#FAF8F5] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                {isSaved ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 text-[#F1931E]" />
+                                    <span>Saved</span>
+                                  </>
+                                ) : (
+                                  <span>Save</span>
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => store.toggleProductStock(p.id)}
+                              className={`min-h-[36px] px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                                p.inStock
+                                  ? 'bg-[#EEF4F0] text-[#4A6B5D]'
+                                  : 'bg-[#FBEAE8] text-[#A23B2A]'
+                              }`}
+                            >
+                              {p.inStock ? 'In Stock' : 'Out of Stock'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
+              </div>
+              <div className="pt-1 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    for (const p of state.products) {
+                      const raw = productPriceDrafts[p.id];
+                      if (raw !== undefined) {
+                        store.upsertProduct({
+                          ...p,
+                          priceEtb: Math.max(0, Number(raw) || 0),
+                        });
+                      }
+                    }
+                    setProductPriceDrafts({});
+                    setSavedProductId('all');
+                    window.setTimeout(() => setSavedProductId(null), 2500);
+                  }}
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save All Store Prices</span>
+                </button>
               </div>
             </section>
 
@@ -1178,25 +1353,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="space-y-6">
             {/* Registrations Table */}
             <section className="rounded-2xl bg-white border border-[#E7E1D6] p-6 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div>
                   <h1 className="text-xl font-semibold text-[#1F3A3D]">
                     Wednesday Registrations &amp; Attendance
                   </h1>
                   <p className="text-xs text-[#5B635E]">
-                    Verify pass codes, active packages, and check members in at the door.
+                    Scan a guest&apos;s QR ticket at the entrance to automatically mark them Checked In on the attendance list.
                   </p>
                 </div>
-                <div className="relative">
-                  <Search className="w-4 h-4 text-[#6B736E] absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="search"
-                    value={regSearch}
-                    onChange={(e) => setRegSearch(e.target.value)}
-                    placeholder="Search member or pass..."
-                    className="min-h-[40px] pl-9 pr-3.5 py-1.5 rounded-xl border border-[#DDD5C7] bg-[#FAF8F5] text-xs w-full sm:w-64"
-                  />
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="relative flex-1 sm:flex-initial">
+                    <Search className="w-4 h-4 text-[#6B736E] absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="search"
+                      value={regSearch}
+                      onChange={(e) => setRegSearch(e.target.value)}
+                      placeholder="Search member or pass..."
+                      className="min-h-[40px] pl-9 pr-3.5 py-1.5 rounded-xl border border-[#DDD5C7] bg-[#FAF8F5] text-xs w-full sm:w-56"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setScannerOpen(true)}
+                    className="min-h-[40px] px-4 py-2 rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <ScanLine className="w-4 h-4" />
+                    <span>Scan QR Pass</span>
+                  </button>
                 </div>
+              </div>
+
+              {/* Attendance Filter & Live Tally */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <div className="inline-flex p-1 rounded-xl bg-[#EFEAE0]">
+                  {(
+                    [
+                      {id: 'all', label: `All (${state.registrations.length})`},
+                      {id: 'checked-in', label: `Checked In (${checkedInCount})`},
+                      {
+                        id: 'awaiting',
+                        label: `Awaiting (${Math.max(0, state.registrations.length - checkedInCount)})`,
+                      },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setAttendanceFilter(tab.id)}
+                      className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                        attendanceFilter === tab.id
+                          ? 'bg-white text-[#1F3A3D] shadow-xs'
+                          : 'text-[#5B635E] hover:text-[#1F3A3D]'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-xs font-medium text-[#4A6B5D] inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span className="font-mono tabular-nums">{checkedInCount}</span> attended
+                </span>
               </div>
 
               <div className="overflow-x-auto">
@@ -1211,45 +1429,63 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#F4F0E8] text-sm">
-                    {filteredRegistrations.map((reg) => (
-                      <tr key={reg.id}>
-                        <td className="py-3 pr-4">
-                          <div className="font-medium text-[#1F3A3D]">{reg.memberName}</div>
-                          <div className="text-xs text-[#5B635E]">{reg.memberPhone}</div>
-                        </td>
-                        <td className="py-3 pr-4">
-                          <div className="text-xs font-medium text-[#2C302E] max-w-[220px] truncate">
-                            {reg.sessionTitle}
-                          </div>
-                          <div className="text-xs text-[#5B635E] font-mono tabular-nums">
-                            {reg.sessionDate}
-                          </div>
-                        </td>
-                        <td className="py-3 pr-4 text-xs font-medium text-[#4A6B5D]">
-                          {reg.packageTier}
-                        </td>
-                        <td className="py-3 pr-4 font-mono text-xs tabular-nums text-[#1F3A3D]">
-                          {reg.passCode}
-                        </td>
-                        <td className="py-3 text-right">
-                          <select
-                            value={reg.attendanceStatus}
-                            onChange={(e) =>
-                              store.updateRegistrationStatus(
-                                reg.id,
-                                e.target.value as typeof reg.attendanceStatus,
-                              )
-                            }
-                            aria-label={`Attendance for ${reg.memberName}`}
-                            className="min-h-[36px] px-2.5 py-1 rounded-lg border border-[#DDD5C7] bg-[#FAF8F5] text-xs font-medium text-[#1F3A3D]"
-                          >
-                            <option value="Confirmed">Confirmed</option>
-                            <option value="Checked In">Checked In</option>
-                            <option value="Pending">Pending</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredRegistrations.map((reg) => {
+                      const isCheckedIn = reg.attendanceStatus === 'Checked In';
+                      return (
+                        <tr key={reg.id}>
+                          <td className="py-3 pr-4">
+                            <div className="font-medium text-[#1F3A3D]">{reg.memberName}</div>
+                            <div className="text-xs text-[#5B635E]">{reg.memberPhone}</div>
+                          </td>
+                          <td className="py-3 pr-4">
+                            <div className="text-xs font-medium text-[#2C302E] max-w-[220px] truncate">
+                              {reg.sessionTitle}
+                            </div>
+                            <div className="text-xs text-[#5B635E] font-mono tabular-nums">
+                              {reg.sessionDate}
+                            </div>
+                          </td>
+                          <td className="py-3 pr-4 text-xs font-medium text-[#4A6B5D]">
+                            {reg.packageTier}
+                          </td>
+                          <td className="py-3 pr-4 font-mono text-xs tabular-nums text-[#1F3A3D]">
+                            {reg.passCode}
+                          </td>
+                          <td className="py-3 text-right">
+                            <div className="inline-flex items-center justify-end gap-2">
+                              {!isCheckedIn && (
+                                <button
+                                  type="button"
+                                  onClick={() => store.updateRegistrationStatus(reg.id, 'Checked In')}
+                                  className="min-h-[34px] px-2.5 py-1 rounded-lg bg-[#EEF4F0] hover:bg-[#DDECE2] text-[#2F5944] text-xs font-semibold cursor-pointer"
+                                >
+                                  Check In
+                                </button>
+                              )}
+                              <select
+                                value={reg.attendanceStatus}
+                                onChange={(e) =>
+                                  store.updateRegistrationStatus(
+                                    reg.id,
+                                    e.target.value as typeof reg.attendanceStatus,
+                                  )
+                                }
+                                aria-label={`Attendance for ${reg.memberName}`}
+                                className={`min-h-[36px] px-2.5 py-1 rounded-lg border text-xs font-medium ${
+                                  isCheckedIn
+                                    ? 'border-[#4A6B5D]/40 bg-[#EEF4F0] text-[#2F5944]'
+                                    : 'border-[#DDD5C7] bg-[#FAF8F5] text-[#1F3A3D]'
+                                }`}
+                              >
+                                <option value="Confirmed">Confirmed</option>
+                                <option value="Checked In">Checked In</option>
+                                <option value="Pending">Pending</option>
+                              </select>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1368,6 +1604,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
       </div>
+      <QRCheckInModal
+        open={scannerOpen}
+        registrations={state.registrations}
+        onCheckInPass={store.checkInByPassCode}
+        onClose={() => setScannerOpen(false)}
+      />
     </div>
   );
 };

@@ -194,6 +194,7 @@ export default function App() {
                 sessions={state.sessions}
                 weeklyGame={state.weeklyGame}
                 checkedInToday={state.checkedInToday}
+                missedDays={store.missedDays}
                 onNavigateTab={handleNavigateUserTab}
               />
             )}
@@ -225,6 +226,8 @@ export default function App() {
                 currentUser={currentUser}
                 members={state.members}
                 checkedInToday={state.checkedInToday}
+                missedDays={store.missedDays}
+                streakStartDate={state.streakStartDate}
                 onCompletePractice={store.completeTodayPractice}
                 onDrawVirtueGift={store.drawVirtueGift}
               />

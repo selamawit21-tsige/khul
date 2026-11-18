@@ -1,5 +1,5 @@
 import React, {useEffect, useState} from 'react';
-import {ArrowRight, Building2, Calendar, Flame, ShoppingBag, Sparkles} from 'lucide-react';
+import {ArrowRight, BellRing, Building2, Calendar, Flame, ShoppingBag, Sparkles} from 'lucide-react';
 import {
   Announcement,
   CommunityMember,
@@ -16,6 +16,7 @@ interface HomeTabProps {
   sessions: WednesdaySession[];
   weeklyGame: WeeklyGameConfig;
   checkedInToday: boolean;
+  missedDays: number;
   onNavigateTab: (tab: UserTab, subTab?: ServiceSubTab) => void;
 }
 
@@ -25,6 +26,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   sessions,
   weeklyGame,
   checkedInToday,
+  missedDays,
   onNavigateTab,
 }) => {
   const [breathSecond, setBreathSecond] = useState(0);
@@ -111,6 +113,34 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           </div>
         </div>
       </section>
+
+      {!checkedInToday && (member.currentStreak > 0 || missedDays >= 1) && (
+        <section
+          aria-label="Daily streak reminder"
+          className="rounded-2xl bg-[#FFF8EE] border border-[#F1931E]/60 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        >
+          <div className="flex items-start gap-3">
+            <BellRing className="w-5 h-5 text-[#C86D0A] shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <p className="text-sm font-semibold text-[#1F3A3D]">
+                {missedDays >= 1
+                  ? 'You missed a day — your streak is ending! Come back for 2 quiet minutes today.'
+                  : `Your ${member.currentStreak}-day streak is ending tonight — keep your rhythm alive!`}
+              </p>
+              <p className="text-xs text-[#5B635E]">
+                One mindful pause resets the whole day. Open the Weekly Game to check off today&apos;s practice.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateTab('game')}
+            className="min-h-[40px] px-4 py-2 rounded-xl bg-[#F1931E] hover:bg-[#DF8312] text-[#1F3A3D] text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            {missedDays >= 1 ? 'Restart Streak' : 'Keep Streak Alive'}
+          </button>
+        </section>
+      )}
 
       {/* Quick Service Highlights */}
       <section aria-labelledby="pillars-heading" className="space-y-4">

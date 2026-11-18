@@ -19,20 +19,74 @@ import {
 const STORAGE_KEY = 'khul_sanctuary_state_v7';
 const BROADCAST_CHANNEL_NAME = 'khul_world_sync';
 
+export function toLocalDateKey(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function addDaysToKey(dateKey: string, deltaDays: number): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  dt.setDate(dt.getDate() + deltaDays);
+  return toLocalDateKey(dt);
+}
+
+export function diffDaysBetweenKeys(fromKey: string, toKey: string): number {
+  const [y1, m1, d1] = fromKey.split('-').map(Number);
+  const [y2, m2, d2] = toKey.split('-').map(Number);
+  const dt1 = new Date(y1, (m1 || 1) - 1, d1 || 1);
+  const dt2 = new Date(y2, (m2 || 1) - 1, d2 || 1);
+  return Math.round((dt2.getTime() - dt1.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function getWeekdayIndexMon0(date = new Date()): number {
+  return (date.getDay() + 6) % 7;
+}
+
+function buildDefaultStateWithDates(): SanctuaryState {
+  const todayKey = toLocalDateKey();
+  return {
+    ...INITIAL_SANCTUARY_STATE,
+    lastPracticeDate: addDaysToKey(todayKey, -1),
+    streakStartDate: addDaysToKey(todayKey, -6),
+  };
+}
+
 function loadInitialState(): SanctuaryState {
-  if (typeof window === 'undefined') return INITIAL_SANCTUARY_STATE;
+  const fallback = buildDefaultStateWithDates();
+  if (typeof window === 'undefined') return fallback;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return INITIAL_SANCTUARY_STATE;
+    if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<SanctuaryState>;
+    const todayKey = toLocalDateKey();
+    const normalizedSessions = Array.isArray(parsed.sessions)
+      ? parsed.sessions.map((s) =>
+          s.posterUrl === '/assets/aistudio/lebona_bf434e08.jpg'
+            ? {...s, posterUrl: '/assets/aistudio/lebona_962b0ece.jpg'}
+            : s,
+        )
+      : undefined;
+    const lastPracticeDate =
+      typeof parsed.lastPracticeDate === 'string' && parsed.lastPracticeDate
+        ? parsed.lastPracticeDate
+        : parsed.checkedInToday
+          ? todayKey
+          : fallback.lastPracticeDate;
+    const checkedInToday = lastPracticeDate === todayKey;
     return {
-      ...INITIAL_SANCTUARY_STATE,
+      ...fallback,
       ...parsed,
+      ...(normalizedSessions ? {sessions: normalizedSessions} : {}),
+      lastPracticeDate,
+      checkedInToday,
       brand: {...INITIAL_SANCTUARY_STATE.brand, ...(parsed.brand ?? {})},
       weeklyGame: {...INITIAL_SANCTUARY_STATE.weeklyGame, ...(parsed.weeklyGame ?? {})},
     };
   } catch {
-    return INITIAL_SANCTUARY_STATE;
+    return fallback;
   }
 }
 
@@ -230,6 +284,11 @@ export function useSanctuaryStore() {
   const currentUser =
     state.members.find((m) => m.id === state.currentUserId) ?? state.members[0];
 
+  const todayKey = toLocalDateKey();
+  const missedDays = state.lastPracticeDate
+    ? Math.max(0, diffDaysBetweenKeys(state.lastPracticeDate, todayKey) - 1)
+    : 0;
+
   const markSavedNow = useCallback(() => {
     setCloudSynced(true);
     setLastCloudSaveAt(new Date().toLocaleTimeString());
@@ -258,20 +317,31 @@ export function useSanctuaryStore() {
       INITIAL_SANCTUARY_STATE.reflectionWords[0];
 
     updateLocalState((prev) => {
-      if (prev.checkedInToday) return prev;
+      const activeTodayKey = toLocalDateKey();
+      if (prev.checkedInToday && prev.lastPracticeDate === activeTodayKey) {
+        return prev;
+      }
+
       const todayLabel = new Date().toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
       });
 
+      const daysSinceLast = prev.lastPracticeDate
+        ? diffDaysBetweenKeys(prev.lastPracticeDate, activeTodayKey)
+        : 1;
+      const didMissDay = daysSinceLast > 1;
+      const todayWeekdayIdx = getWeekdayIndexMon0();
+
       const updatedMembers = prev.members.map((m) => {
         if (m.id !== prev.currentUserId) return m;
-        const nextWeek = [...m.weekDaysCompleted];
-        nextWeek[6] = true;
+        const nextWeek = didMissDay
+          ? Array.from({length: 7}, (_, idx) => idx === todayWeekdayIdx)
+          : m.weekDaysCompleted.map((val, idx) => (idx === todayWeekdayIdx ? true : val));
         return {
           ...m,
-          currentStreak: m.currentStreak + 1,
+          currentStreak: didMissDay ? 1 : m.currentStreak + 1,
           totalDaysPracticed: m.totalDaysPracticed + 1,
           weekDaysCompleted: nextWeek,
         };
@@ -280,6 +350,10 @@ export function useSanctuaryStore() {
       return {
         ...prev,
         checkedInToday: true,
+        lastPracticeDate: activeTodayKey,
+        streakStartDate: didMissDay
+          ? activeTodayKey
+          : prev.streakStartDate ?? activeTodayKey,
         members: updatedMembers,
         collectedWords: [
           {
@@ -770,6 +844,99 @@ export function useSanctuaryStore() {
     [apiRequest, markSavedNow, updateLocalState],
   );
 
+  const checkInByPassCode = useCallback(
+    async (
+      rawCode: string,
+    ): Promise<{
+      status: 'checked-in' | 'already-checked-in' | 'not-found';
+      scannedCode: string;
+      registration?: SessionRegistration;
+    }> => {
+      let cleanCode = rawCode.trim();
+      if (cleanCode.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(cleanCode) as {passCode?: string};
+          if (parsed.passCode) cleanCode = parsed.passCode.trim();
+        } catch {
+          // keep raw string
+        }
+      }
+      if (cleanCode.toUpperCase().startsWith('KHUL:PASS:')) {
+        cleanCode = cleanCode.slice(10).trim();
+      }
+      if (!cleanCode) {
+        return {status: 'not-found', scannedCode: ''};
+      }
+
+      const normalized = cleanCode.toUpperCase();
+      const localMatch = state.registrations.find(
+        (r) =>
+          r.passCode.toUpperCase() === normalized || r.id.toUpperCase() === normalized,
+      );
+
+      if (localMatch) {
+        const alreadyCheckedIn = localMatch.attendanceStatus === 'Checked In';
+        const updatedReg: SessionRegistration = {
+          ...localMatch,
+          attendanceStatus: 'Checked In',
+        };
+        if (!alreadyCheckedIn) {
+          updateLocalState((prev) => ({
+            ...prev,
+            registrations: prev.registrations.map((r) =>
+              r.id === localMatch.id ? updatedReg : r,
+            ),
+          }));
+          markSavedNow();
+          void apiRequest(`/api/admin/registrations/${encodeURIComponent(localMatch.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({attendanceStatus: 'Checked In'}),
+          }).catch(() => {});
+        }
+        return {
+          status: alreadyCheckedIn ? 'already-checked-in' : 'checked-in',
+          scannedCode: localMatch.passCode,
+          registration: updatedReg,
+        };
+      }
+
+      // Check backend database in case attendee registered from another device
+      try {
+        const resp = (await apiRequest('/api/admin/registrations/check-in', {
+          method: 'POST',
+          body: JSON.stringify({passCode: cleanCode}),
+        })) as {
+          ok: boolean;
+          alreadyCheckedIn?: boolean;
+          registration?: SessionRegistration;
+        };
+        if (resp.ok && resp.registration) {
+          const reg = resp.registration;
+          updateLocalState((prev) => {
+            const exists = prev.registrations.some((r) => r.id === reg.id);
+            return {
+              ...prev,
+              registrations: exists
+                ? prev.registrations.map((r) => (r.id === reg.id ? reg : r))
+                : [reg, ...prev.registrations],
+            };
+          });
+          markSavedNow();
+          return {
+            status: resp.alreadyCheckedIn ? 'already-checked-in' : 'checked-in',
+            scannedCode: reg.passCode,
+            registration: reg,
+          };
+        }
+      } catch {
+        // Not found in DB or offline
+      }
+
+      return {status: 'not-found', scannedCode: cleanCode};
+    },
+    [apiRequest, markSavedNow, state.registrations, updateLocalState],
+  );
+
   const awardMemberBadge = useCallback(
     (memberId: string, badge: string) => {
       const cleanBadge = badge.trim();
@@ -789,7 +956,7 @@ export function useSanctuaryStore() {
   );
 
   const resetDemoData = useCallback(() => {
-    updateLocalState(() => INITIAL_SANCTUARY_STATE);
+    updateLocalState(() => buildDefaultStateWithDates());
     markSavedNow();
     void apiRequest('/api/admin/reset-defaults', {method: 'POST'})
       .then(() => fetchPublicState())
@@ -799,6 +966,7 @@ export function useSanctuaryStore() {
   return {
     state,
     currentUser,
+    missedDays,
     cloudSynced,
     lastCloudSaveAt,
     updateMemberName,
@@ -824,6 +992,7 @@ export function useSanctuaryStore() {
     upsertReflectionWord,
     deleteReflectionWord,
     updateRegistrationStatus,
+    checkInByPassCode,
     awardMemberBadge,
     resetDemoData,
   };
